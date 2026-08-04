@@ -503,6 +503,7 @@ tr.row-click:hover td{background:var(--surface2)}
     <div><h3 id="drTitle" style="font-size:15px;font-weight:700"></h3><p id="drSub" style="font-size:12px;color:var(--text3);margin-top:3px"></p></div>
     <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
       <button class="btn sm" id="drEditBtn" style="display:none" onclick="openEditTask(drawerTaskId)">編輯</button>
+      <button class="btn sm danger" id="drDeleteBtn" style="display:none" onclick="deleteTaskConfirm(drawerTaskId)">刪除</button>
       <button class="m-close" onclick="closeDrawer()">×</button>
     </div>
   </div>
@@ -1449,22 +1450,25 @@ async function doSubmitLaunch(){
   if(error){ toast('建立任務失敗：' + error.message); btn.disabled=false; btn.textContent='送出簽核任務'; return; }
 
   if(launchFilesDraft.length){
-    let ok = 0, fail = 0;
+    let ok = 0, fail = 0, firstErr = '';
     for(let i=0;i<launchFilesDraft.length;i++){
       const f = launchFilesDraft[i];
       footMsg.textContent = `上傳附件中 ${i+1}/${launchFilesDraft.length}...`;
-      const path = `tasks/${newTaskId}/${Date.now()}_${f.name}`;
+      const extMatch = f.name.match(/\.([a-zA-Z0-9]+)$/);
+      const ext = extMatch ? extMatch[1].toLowerCase() : 'bin';
+      const safeKey = `${Date.now()}_${i}.${ext}`;
+      const path = `tasks/${newTaskId}/${safeKey}`;
       const { error: upErr } = await sb.storage.from('task-files').upload(path, f, { contentType: f.type || 'application/octet-stream' });
-      if(upErr){ fail++; continue; }
+      if(upErr){ fail++; if(!firstErr) firstErr = upErr.message; continue; }
       const { error: rowErr } = await sb.from('task_files').insert({
         task_id: newTaskId, file_name: f.name, file_path: path,
         content_type: f.type || '', file_size: f.size,
         uploaded_by: me.id, uploaded_by_name: me.name
       });
-      if(rowErr){ fail++; } else { ok++; }
+      if(rowErr){ fail++; if(!firstErr) firstErr = rowErr.message; } else { ok++; }
     }
     footMsg.textContent = '';
-    if(fail){ toast(`⚠️ ${ok} 個附件上傳成功，${fail} 個失敗`); }
+    if(fail){ toast(`⚠️ ${ok} 個附件上傳成功，${fail} 個失敗${firstErr?'：'+firstErr:''}`); }
   }
 
   btn.disabled = false; btn.textContent = '送出簽核任務';
@@ -1482,6 +1486,30 @@ function canEditTask(t){
   if(!t) return false;
   if(t.status !== 'signing') return false;
   return isAdmin() || t.createdById === me.id;
+}
+function canDeleteTask(t){
+  if(!t) return false;
+  if(isAdmin()) return true;
+  return t.createdById === me.id && t.status !== 'done';
+}
+async function deleteTaskConfirm(taskId){
+  const t = tasks.find(x=>x.id===taskId);
+  if(!t || !canDeleteTask(t)){ toast('您沒有權限刪除此任務'); return; }
+  const sure = confirm(`確定要刪除「${t.name}」嗎？\n\n此動作無法復原，會一併刪除所有簽署紀錄與附件。`);
+  if(!sure) return;
+
+  if(t.files && t.files.length){
+    const paths = t.files.map(f => f.path);
+    await sb.storage.from('task-files').remove(paths);
+  }
+  const { error } = await sb.rpc('delete_task', { p_task_id: taskId });
+  if(error){ toast('刪除失敗：' + error.message); return; }
+
+  closeDrawer();
+  await loadTasks();
+  if(currentPage==='tasks') renderTasks();
+  if(currentPage==='dash') renderDash();
+  toast('已刪除任務');
 }
 function openEditTask(taskId){
   const t = tasks.find(x=>x.id===taskId);
@@ -1544,6 +1572,7 @@ function openDrawer(taskId){
   document.getElementById('drTitle').textContent = t.name;
   document.getElementById('drSub').textContent = t.type + ' · 建立於 ' + fmtDate(t.createdAt);
   document.getElementById('drEditBtn').style.display = canEditTask(t) ? 'inline-flex' : 'none';
+  document.getElementById('drDeleteBtn').style.display = canDeleteTask(t) ? 'inline-flex' : 'none';
 
   const done = t.signers.filter(s=>s.status==='done').length;
   const bn = bottleneckInfo(t);
