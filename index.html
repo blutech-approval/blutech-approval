@@ -130,13 +130,14 @@ tr.row-click:hover td{background:var(--surface2)}
 .chain-item[draggable="true"]{cursor:default}
 .chain-remove:hover{color:var(--danger)}
 
-/* ── drawer ── */
-#drawerOv{position:fixed;inset:0;background:rgba(10,18,28,.35);z-index:400;display:none}
-#drawerOv.open{display:block}
-#drawer{position:fixed;top:0;right:-420px;width:400px;height:100vh;background:var(--surface);z-index:401;box-shadow:-8px 0 24px rgba(0,0,0,.12);transition:right .22s;overflow-y:auto}
-#drawer.open{right:0}
-.d-head{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;position:sticky;top:0;background:var(--surface)}
-.d-body{padding:18px 20px}
+/* ── drawer（改為置中的完整視窗）── */
+#drawerOv{position:fixed;inset:0;background:rgba(10,18,28,.45);backdrop-filter:blur(2px);z-index:400;display:none;align-items:center;justify-content:center;padding:24px}
+#drawerOv.open{display:flex}
+#drawer{position:relative;width:960px;max-width:100%;max-height:92vh;background:var(--surface);border-radius:var(--rxl);z-index:401;box-shadow:var(--sh-lg);overflow-y:auto;transform:scale(.97);opacity:0;transition:transform .18s,opacity .18s}
+#drawerOv.open #drawer{transform:scale(1);opacity:1}
+.d-head{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;position:sticky;top:0;background:var(--surface);z-index:1;border-radius:var(--rxl) var(--rxl) 0 0}
+.d-body{padding:22px 24px;display:grid;grid-template-columns:1.3fr 1fr;gap:28px}
+.d-body-col{min-width:0}
 .d-sec{margin-bottom:20px}
 .d-sec-title{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 .signer-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--surface3)}
@@ -178,7 +179,8 @@ tr.row-click:hover td{background:var(--surface2)}
   aside.open{left:0}
   .stat-grid{grid-template-columns:repeat(2,1fr)}
   .modal,.modal.wide{width:96vw}
-  #drawer{width:92vw;right:-92vw}
+  #drawer{width:96vw;max-height:94vh}
+  .d-body{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -496,6 +498,16 @@ tr.row-click:hover td{background:var(--surface2)}
   </div>
 </div>
 
+<!-- ══════════ 附件預覽 Modal ══════════ -->
+<div class="ov" id="filePreviewOv">
+  <div class="modal wide" style="height:88vh;display:flex;flex-direction:column">
+    <div class="m-head"><h3 id="filePreviewTitle">預覽附件</h3><button class="m-close" onclick="closeModal('filePreviewOv')">×</button></div>
+    <div class="m-body" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2)" id="filePreviewBody">
+      <p style="font-size:13px;color:var(--text3)">載入中...</p>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════ 任務詳情 Drawer ══════════ -->
 <div id="drawerOv" onclick="closeDrawer()"></div>
 <div id="drawer">
@@ -535,6 +547,7 @@ const CHAIN_CONFIG = { launch: { containerId: 'chainList' }, edit: { containerId
 let launchFilesDraft = [];  // 發起簽核時選擇的附件（File 物件陣列）
 let stampState = null;      // PDF 蓋章 Modal 目前的狀態
 let mySigTab = 'draw';      // 設定頁「我的簽名」目前選到的分頁
+let mySigFileData = null;   // 插入檔案模式下，使用者選擇的圖檔 dataURL
 let signingContext = null;  // { taskId, signerId }
 let drawing = false;
 
@@ -888,7 +901,7 @@ function renderDash(){
     html += inProgress.map(t => {
       const bn = bottleneckInfo(t);
       return `<tr class="row-click" onclick="openDrawer(${t.id})">
-        <td><div style="font-weight:600;font-size:13px">${esc(t.name)}</div><div style="font-size:11px;color:var(--text3)">${esc(t.type)}</div></td>
+        <td><div style="font-weight:600;font-size:13px">${esc(t.name)}</div><div style="font-size:11px;color:var(--text3)">${esc(t.type)} · 發起人：${esc(t.createdBy||'—')}</div></td>
         <td>${stepTrackHtml(t)}<div style="margin-top:5px;font-size:11.5px;color:${bn.color}">${bn.text}</div></td>
       </tr>`;
     }).join('');
@@ -966,7 +979,7 @@ function renderTasks(){
       const bClass = 'b-' + (t.status==='signing'?'signing':t.status);
       const bn = bottleneckInfo(t);
       return `<tr class="row-click" onclick="openDrawer(${t.id})">
-        <td><div style="font-weight:600">${esc(t.name)}</div><div style="font-size:11.5px;color:var(--text3)">${esc(t.type)}</div></td>
+        <td><div style="font-weight:600">${esc(t.name)}</div><div style="font-size:11.5px;color:var(--text3)">${esc(t.type)} · 發起人：${esc(t.createdBy||'—')}</div></td>
         <td><span class="badge ${bClass}">${STATUS_LABEL[t.status]||t.status}</span></td>
         <td>${stepTrackHtml(t)}<div style="margin-top:5px;font-size:11.5px;color:${bn.color}">${bn.text}</div></td>
         <td style="font-size:12.5px;color:var(--text3)">${t.deadline||'—'}</td>
@@ -1107,9 +1120,16 @@ function renderSettings(){
   html += '<div class="sign-tabs">';
   html += `<div class="sign-tab ${mySigTab==='draw'?'active':''}" id="myTabDraw" onclick="switchMySigTab('draw')">✍️ 手寫簽名</div>`;
   html += `<div class="sign-tab ${mySigTab==='type'?'active':''}" id="myTabType" onclick="switchMySigTab('type')">Aa 打字簽名</div>`;
+  html += `<div class="sign-tab ${mySigTab==='upload'?'active':''}" id="myTabUpload" onclick="switchMySigTab('upload')">📁 插入檔案</div>`;
   html += '</div>';
   html += `<div class="sign-panel ${mySigTab==='draw'?'active':''}" id="myPanelDraw"><canvas id="mySigCanvas" style="border:1.5px solid var(--border);border-radius:10px;width:100%;height:140px;touch-action:none;background:var(--surface2);cursor:crosshair;display:block"></canvas><button class="btn sm" style="margin-top:8px" onclick="clearMySigCanvas()">清除重寫</button></div>`;
   html += `<div class="sign-panel ${mySigTab==='type'?'active':''}" id="myPanelType"><input class="fi" id="myTypeSignInput" placeholder="輸入姓名" oninput="updateMyTypePreview()" style="margin-bottom:10px"><div class="type-preview" id="myTypePreview">簽名預覽</div></div>`;
+  html += `<div class="sign-panel ${mySigTab==='upload'?'active':''}" id="myPanelUpload">
+    <p style="font-size:12px;color:var(--text3);margin-bottom:10px">可上傳掃描好的印章或簽名圖檔（建議白底或透明背景的 PNG，效果最好）</p>
+    <input type="file" id="mySigFileInput" accept="image/png,image/jpeg" style="display:none" onchange="handleMySigFile(this)">
+    <button class="btn sm" type="button" onclick="document.getElementById('mySigFileInput').click()">選擇圖檔</button>
+    <div id="mySigFilePreview" style="margin-top:10px"></div>
+  </div>`;
   html += '<button class="btn primary sm" style="margin-top:12px" onclick="saveMyDefaultSignature()">儲存為我的預設簽名</button>';
   html += '</div>';
 
@@ -1143,8 +1163,10 @@ function switchMySigTab(tab){
   mySigTab = tab;
   document.getElementById('myTabDraw').classList.toggle('active', tab==='draw');
   document.getElementById('myTabType').classList.toggle('active', tab==='type');
+  document.getElementById('myTabUpload').classList.toggle('active', tab==='upload');
   document.getElementById('myPanelDraw').classList.toggle('active', tab==='draw');
   document.getElementById('myPanelType').classList.toggle('active', tab==='type');
+  document.getElementById('myPanelUpload').classList.toggle('active', tab==='upload');
 }
 function initMySigCanvas(){
   const cv = document.getElementById('mySigCanvas');
@@ -1187,6 +1209,18 @@ function textToSignaturePng(text){
   ctx.fillText(text, cv.width/2, cv.height/2);
   return cv.toDataURL('image/png');
 }
+function handleMySigFile(input){
+  const f = input.files && input.files[0];
+  if(!f) return;
+  if(f.size > 5*1024*1024){ toast('圖檔請控制在 5MB 以內'); input.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    mySigFileData = e.target.result;
+    document.getElementById('mySigFilePreview').innerHTML =
+      `<div style="border:1.5px solid var(--border);border-radius:10px;padding:12px;text-align:center;background:var(--surface2)"><img src="${mySigFileData}" style="max-height:100px;max-width:100%"></div>`;
+  };
+  reader.readAsDataURL(f);
+}
 async function saveMyDefaultSignature(){
   let dataUrl, type;
   if(mySigTab === 'draw'){
@@ -1194,6 +1228,9 @@ async function saveMyDefaultSignature(){
     const blank = !cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data.some((v,i)=>i%4===3 && v>0);
     if(blank){ toast('請先手寫簽名'); return; }
     dataUrl = cv.toDataURL('image/png'); type = 'draw';
+  } else if(mySigTab === 'upload'){
+    if(!mySigFileData){ toast('請先選擇圖檔'); return; }
+    dataUrl = mySigFileData; type = 'upload';
   } else {
     const v = document.getElementById('myTypeSignInput').value.trim();
     if(!v){ toast('請輸入簽名文字'); return; }
@@ -1202,6 +1239,7 @@ async function saveMyDefaultSignature(){
   const { error } = await sb.from('profiles').update({ default_signature_type: type, default_signature_data: dataUrl }).eq('id', me.id);
   if(error){ toast('儲存失敗：' + error.message); return; }
   me.defaultSigType = type; me.defaultSigData = dataUrl;
+  mySigFileData = null;
   toast('✅ 已儲存您的預設簽名');
   renderSettings();
 }
@@ -1576,19 +1614,21 @@ function openDrawer(taskId){
 
   const done = t.signers.filter(s=>s.status==='done').length;
   const bn = bottleneckInfo(t);
-  let html = `<div class="d-sec">
+
+  let left = `<div class="d-sec">
     <div style="margin-bottom:10px">${stepTrackHtml(t)}</div>
     <div style="font-size:12.5px;color:${bn.color};margin-bottom:12px">${bn.text}</div>
     <div class="d-sec-title">任務資訊</div>
     <div style="font-size:13px;color:var(--text2);line-height:2">
+      發起人：<b>${esc(t.createdBy||'—')}</b><br>
       狀態：<span class="badge b-${t.status}">${STATUS_LABEL[t.status]}</span><br>
       截止日期：${t.deadline||'未設定'}<br>
       進度：${done}/${t.signers.length} 人完成<br>
       ${t.note?('備註：'+esc(t.note)):''}
     </div></div>`;
 
-  html += '<div class="d-sec"><div class="d-sec-title">簽核流程</div>';
-  html += t.signers.map(s => {
+  left += '<div class="d-sec"><div class="d-sec-title">簽核流程</div>';
+  left += t.signers.map(s => {
     const avClass = s.status==='done' ? 'done' : s.status==='signing' ? 'signing' : '';
     const canSign = (s.status==='signing') && s.email===me.email;
     return `<div class="signer-row">
@@ -1598,22 +1638,24 @@ function openDrawer(taskId){
       ${canSign?`<button class="btn primary sm" onclick="openSignModal(${t.id},${s.id})">簽署</button>`:''}
     </div>`;
   }).join('');
-  html += '</div>';
+  left += '</div>';
 
   const myTurnHere = t.signers.some(s => s.status === 'signing' && s.email === me.email);
-  html += '<div class="d-sec"><div class="d-sec-title">附件 (' + (t.files?t.files.length:0) + ')</div>';
+  let right = '<div class="d-sec"><div class="d-sec-title">附件 (' + (t.files?t.files.length:0) + ')</div>';
   if(!t.files || !t.files.length){
-    html += '<p style="font-size:12.5px;color:var(--text3)">尚未上傳附件</p>';
+    right += '<p style="font-size:12.5px;color:var(--text3)">尚未上傳附件</p>';
   } else {
-    html += t.files.map(f => {
+    right += t.files.map(f => {
       const isPdf = /\.pdf$/i.test(f.name) || f.contentType === 'application/pdf';
+      const isImg = /\.(png|jpe?g|gif|webp)$/i.test(f.name) || /^image\//.test(f.contentType||'');
       const stampBadge = f.stampCount > 0 ? `<span style="font-size:10.5px;color:var(--ok)">🔏 已蓋章 ${f.stampCount} 次${f.lastStampedByName?'（最後：'+esc(f.lastStampedByName)+'）':''}</span>` : '';
       return `<div style="padding:9px 0;border-bottom:1px solid var(--surface3)">
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ${esc(f.name)}</span>
+          <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${isImg?'🖼️':'📄'} ${esc(f.name)}</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:2px">${fmtFileSize(f.size||0)} · ${esc(f.uploadedByName||'')} 上傳</div>
-        <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
+        <div style="display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap">
+          ${(isPdf||isImg) ? `<button class="btn sm" onclick="openFilePreview(${f.id})">預覽</button>` : ''}
           <button class="btn sm" onclick="downloadTaskFile(${f.id})">下載</button>
           ${isPdf && myTurnHere ? `<button class="btn sm primary" onclick="openStampModal(${f.id})">在文件上蓋章</button>` : ''}
           ${stampBadge}
@@ -1621,9 +1663,10 @@ function openDrawer(taskId){
       </div>`;
     }).join('');
   }
-  html += '</div>';
+  right += '</div>';
 
-  document.getElementById('drBody').innerHTML = html;
+  document.getElementById('drBody').innerHTML =
+    `<div class="d-body-col">${left}</div><div class="d-body-col">${right}</div>`;
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawerOv').classList.add('open');
 }
@@ -1744,6 +1787,27 @@ async function downloadTaskFile(fileId){
   const { data, error } = await sb.storage.from('task-files').createSignedUrl(found.file.path, 300);
   if(error){ toast('下載失敗：' + error.message); return; }
   window.open(data.signedUrl, '_blank');
+}
+async function openFilePreview(fileId){
+  const found = findTaskFile(fileId);
+  if(!found){ toast('找不到檔案'); return; }
+  const f = found.file;
+  document.getElementById('filePreviewTitle').textContent = f.name;
+  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">載入中...</p>';
+  openModalEl('filePreviewOv');
+
+  const { data, error } = await sb.storage.from('task-files').createSignedUrl(f.path, 600);
+  if(error){
+    document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--danger)">預覽失敗：' + esc(error.message) + '</p>';
+    return;
+  }
+  const isPdf = /\.pdf$/i.test(f.name) || f.contentType === 'application/pdf';
+  const body = document.getElementById('filePreviewBody');
+  if(isPdf){
+    body.innerHTML = `<iframe src="${data.signedUrl}" style="width:100%;height:100%;border:none"></iframe>`;
+  } else {
+    body.innerHTML = `<img src="${data.signedUrl}" style="max-width:100%;max-height:100%;object-fit:contain">`;
+  }
 }
 
 // ══════════════════════════════════════
