@@ -272,6 +272,10 @@ tr.row-click:hover td{background:var(--surface2)}
       <div class="nav-item" data-page="members" onclick="goPage('members')">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>同仁名冊
       </div>
+      <div class="nav-lbl">帳號</div>
+      <div class="nav-item" data-page="settings" onclick="goPage('settings')">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>設定
+      </div>
     </nav>
     <div class="user-card">
       <div class="user-row">
@@ -370,6 +374,33 @@ tr.row-click:hover td{background:var(--surface2)}
   </div>
 </div>
 
+<!-- ══════════ 核決矩陣編輯 Modal ══════════ -->
+<div class="ov" id="matrixEditOv">
+  <div class="modal">
+    <div class="m-head"><h3 id="matrixEditTitle">編輯文件類型</h3><button class="m-close" onclick="closeModal('matrixEditOv')">×</button></div>
+    <div class="m-body">
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px">
+        <div class="fr"><label class="flbl">代碼</label><input class="fi" id="mCode" placeholder="例：A" maxlength="4" style="text-transform:uppercase"></div>
+        <div class="fr"><label class="flbl">文件名稱</label><input class="fi" id="mName" placeholder="例：訂單合約書"></div>
+      </div>
+      <div class="fr"><label class="flbl">備註</label><input class="fi" id="mNote" placeholder="選填，說明適用情境"></div>
+      <div class="fr">
+        <label class="flbl">用印類型</label>
+        <select class="fi" id="mSeal"><option value="合約章">合約章</option><option value="便章">便章</option></select>
+      </div>
+      <div class="fr">
+        <label class="flbl">簽核關卡（依序排列）</label>
+        <div id="mChainList"></div>
+        <button class="btn sm" onclick="addMatrixChainStep()">+ 新增關卡</button>
+      </div>
+    </div>
+    <div class="m-foot">
+      <span></span>
+      <button class="btn primary" onclick="submitMatrixEdit()">儲存</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════ 任務詳情 Drawer ══════════ -->
 <div id="drawerOv" onclick="closeDrawer()"></div>
 <div id="drawer">
@@ -405,30 +436,15 @@ let drawing = false;
 // ══════════════════════════════════════
 // 核決矩陣資料
 // ══════════════════════════════════════
-const MATRIX_DATA = [
+// 核決矩陣資料現在從資料庫 matrix_types 表讀取（見 loadMatrixData），
+// 這裡留一份預設值，是在資料庫還沒讀到資料前的暫時顯示用
+let MATRIX_DATA = [
   { code:'A', name:'訂單合約書', note:'一般訂單/採購合約', seal:'合約章',
     chain:[ {role:'Sales主管',action:'countersign'}, {role:'CEO',action:'approve'} ] },
-  { code:'B', name:'合作意向書（MOU）', note:'無罰則由Sales主管核決；含罰則需CEO核決', seal:'合約章',
-    chain:[ {role:'Sales主管',action:'approve'} ] },
-  { code:'C', name:'環安承諾書', note:'環境安全相關承諾書', seal:'合約章',
-    chain:[ {role:'Sales主管',action:'approve'} ] },
-  { code:'D', name:'保密合約書（NDA）', note:'無罰則由Sales主管核決；含罰則需CEO核決', seal:'合約章',
-    chain:[ {role:'Sales主管',action:'approve'} ] },
-  { code:'E', name:'客戶/供應商表單', note:'廠商評核、付款條件建檔', seal:'便章',
-    chain:[ {role:'Sales主管',action:'countersign'}, {role:'FAAO主管',action:'countersign'}, {role:'CEO',action:'approve'} ] },
-  { code:'F', name:'工程承攬合約', note:'工程施工/發包合約', seal:'合約章',
-    chain:[ {role:'Sales主管',action:'countersign'}, {role:'FAAO主管',action:'approve'}, {role:'CEO',action:'notify'} ] },
-  { code:'G', name:'匯款同意書', note:'銀行帳戶變更、資金往來，務必電話覆核', seal:'合約章',
-    chain:[ {role:'FAAO主管',action:'approve'}, {role:'CEO',action:'notify'} ] },
-  { code:'H', name:'工程保固書', note:'竣工保固相關文件', seal:'合約章',
-    chain:[ {role:'CPM主管',action:'approve'}, {role:'FAAO主管',action:'countersign'}, {role:'CEO',action:'notify'} ] },
-  { code:'J', name:'切結書', note:'依內容性質，由對應最高主管核決', seal:'便章',
-    chain:[ {role:'CEO',action:'approve'} ] },
-  { code:'K', name:'工程險要保書', note:'工程保險投保申請', seal:'合約章',
-    chain:[ {role:'CPM主管',action:'approve'}, {role:'CEO',action:'notify'} ] },
-  { code:'M', name:'公文發函', note:'對外正式公文', seal:'便章',
-    chain:[ {role:'Sales主管',action:'countersign'}, {role:'CPM主管',action:'countersign'}, {role:'CEO',action:'approve'} ] },
 ];
+let matrixChainDraft = [];   // 編輯文件類型時目前的簽核鏈草稿
+let editingMatrixCode = null; // 目前正在編輯的文件代碼（null 代表新增）
+const MATRIX_ROLE_OPTIONS = ['Sales主管','CPM主管','FAAO主管','CEO'];
 
 const ACTION_LABEL = { approve:'核決', countersign:'會簽', notify:'知會' };
 const STATUS_LABEL = { draft:'草稿', signing:'簽署中', done:'已完成', expired:'已失效' };
@@ -624,6 +640,7 @@ async function afterLogin(){
 
   await loadDirectory();
   await loadTasks();
+  await loadMatrixData();
   populateTypeSelect();
   goPage('dash');
   subscribeRealtime();
@@ -641,6 +658,16 @@ async function loadDirectory(){
   const { data, error } = await sb.from('profiles').select('*').order('name');
   if(error){ console.error(error); return; }
   directory = data || [];
+}
+async function loadMatrixData(){
+  const { data, error } = await sb.from('matrix_types').select('*').order('sort_order');
+  if(error){ console.error(error); return; }
+  if(data && data.length){
+    MATRIX_DATA = data.map(m => ({ code:m.code, name:m.name, note:m.note, seal:m.seal, chain: m.chain||[] }));
+  }
+}
+function isAdmin(){
+  return me && (me.role === '管理員' || me.role === 'CEO');
 }
 async function loadTasks(){
   const { data: taskRows, error: e1 } = await sb.from('tasks').select('*').order('created_at', { ascending:false });
@@ -670,6 +697,7 @@ function subscribeRealtime(){
   sb.channel('app-changes')
     .on('postgres_changes', { event:'*', schema:'public', table:'tasks' }, async ()=>{ await loadTasks(); if(currentPage==='dash') renderDash(); if(currentPage==='tasks') renderTasks(); })
     .on('postgres_changes', { event:'*', schema:'public', table:'task_signers' }, async ()=>{ await loadTasks(); if(currentPage==='dash') renderDash(); if(currentPage==='tasks') renderTasks(); if(drawerTaskId) openDrawer(drawerTaskId); })
+    .on('postgres_changes', { event:'*', schema:'public', table:'matrix_types' }, async ()=>{ await loadMatrixData(); populateTypeSelect(); if(currentPage==='matrix') renderMatrixPage(); })
     .subscribe();
 }
 
@@ -681,6 +709,7 @@ const PAGE_META = {
   tasks:{ title:'簽核任務', sub:'管理所有進行中的文件簽核流程' },
   matrix:{ title:'核決矩陣', sub:'各類文件的簽核層級對照表' },
   members:{ title:'同仁名冊', sub:'公司登入帳號與角色列表' },
+  settings:{ title:'設定', sub:'個人資料、密碼與角色管理' },
 };
 function goPage(p){
   currentPage = p;
@@ -693,6 +722,7 @@ function goPage(p){
   if(p==='tasks') renderTasks();
   if(p==='matrix') renderMatrixPage();
   if(p==='members') renderMembers();
+  if(p==='settings') renderSettings();
 }
 
 // ══════════════════════════════════════
@@ -728,7 +758,56 @@ function renderDash(){
     }).join('');
   }
   html += '</div>';
+
+  html += '<div style="margin-top:20px"><div style="font-size:14px;font-weight:700;margin-bottom:12px">全公司簽核進度總覽</div>';
+  if(!inProgress.length){
+    html += '<div class="card"><div class="empty" style="padding:24px 0"><h4>目前沒有進行中的簽核任務</h4></div></div>';
+  } else {
+    html += '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>文件名稱</th><th>簽核進度</th></tr></thead><tbody>';
+    html += inProgress.map(t => {
+      const bn = bottleneckInfo(t);
+      return `<tr class="row-click" onclick="openDrawer(${t.id})">
+        <td><div style="font-weight:600;font-size:13px">${esc(t.name)}</div><div style="font-size:11px;color:var(--text3)">${esc(t.type)}</div></td>
+        <td>${stepTrackHtml(t)}<div style="margin-top:5px;font-size:11.5px;color:${bn.color}">${bn.text}</div></td>
+      </tr>`;
+    }).join('');
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
   document.getElementById('content').innerHTML = html;
+}
+
+// ══════════════════════════════════════
+// 簽核進度條 / 卡關提示 輔助函式
+// ══════════════════════════════════════
+function daysSince(dateStr){
+  if(!dateStr) return 0;
+  const d = new Date(dateStr).getTime();
+  if(isNaN(d)) return 0;
+  return Math.max(0, Math.floor((Date.now() - d) / 86400000));
+}
+function stepTrackHtml(t){
+  if(!t.signers.length) return '<span style="font-size:12px;color:var(--text4)">尚未設定簽核人</span>';
+  return '<div style="display:flex;align-items:center;gap:3px">' +
+    t.signers.map((s,i) => {
+      const bg = s.status==='done' ? 'var(--ok)' : s.status==='signing' ? 'var(--accent)' : 'var(--surface3)';
+      const fg = s.status==='pending' ? 'var(--text3)' : '#fff';
+      const pulse = s.status==='signing' ? 'box-shadow:0 0 0 3px var(--accent-soft)' : '';
+      const dot = `<div title="${esc(s.name)}（${esc(s.role||'')}・${ACTION_LABEL[s.action]||''}）" style="width:20px;height:20px;border-radius:50%;background:${bg};color:${fg};font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;${pulse}">${s.status==='done'?'✓':(i+1)}</div>`;
+      const line = i < t.signers.length-1 ? `<div style="width:14px;height:2px;background:${s.status==='done'?'var(--ok)':'var(--border)'};flex-shrink:0"></div>` : '';
+      return dot + line;
+    }).join('') + '</div>';
+}
+function bottleneckInfo(t){
+  if(t.status === 'done') return { text: '✅ 已全部完成', color: 'var(--ok)' };
+  if(t.status === 'expired') return { text: '⚠️ 已逾期失效', color: 'var(--danger)' };
+  const cur = t.signers.find(s => s.status === 'signing');
+  if(!cur) return { text: '—', color: 'var(--text3)' };
+  const idx = t.signers.findIndex(s => s.id === cur.id);
+  const startAt = idx > 0 ? t.signers[idx-1].signedAt : t.createdAt;
+  const days = daysSince(startAt);
+  const waitTxt = days > 0 ? `已卡 ${days} 天` : '今天剛輪到';
+  return { text: `🔸 卡在 ${cur.name}（${ACTION_LABEL[cur.action]||''}）・${waitTxt}`, color: days >= 3 ? 'var(--danger)' : 'var(--text2)' };
 }
 
 // ══════════════════════════════════════
@@ -739,15 +818,14 @@ function renderTasks(){
   if(!tasks.length){
     html = '<div class="empty"><h4>目前沒有任何簽核任務</h4><p>點右上角「發起簽核」建立第一筆任務</p></div>';
   } else {
-    html = '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>文件名稱</th><th>狀態</th><th>進度</th><th>截止日</th><th></th></tr></thead><tbody>';
+    html = '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>文件名稱</th><th>狀態</th><th>簽核進度</th><th>截止日</th><th></th></tr></thead><tbody>';
     html += tasks.map(t => {
-      const done = t.signers.filter(s=>s.status==='done').length;
-      const total = t.signers.length;
       const bClass = 'b-' + (t.status==='signing'?'signing':t.status);
+      const bn = bottleneckInfo(t);
       return `<tr class="row-click" onclick="openDrawer(${t.id})">
         <td><div style="font-weight:600">${esc(t.name)}</div><div style="font-size:11.5px;color:var(--text3)">${esc(t.type)}</div></td>
         <td><span class="badge ${bClass}">${STATUS_LABEL[t.status]||t.status}</span></td>
-        <td>${done}/${total} 人</td>
+        <td>${stepTrackHtml(t)}<div style="margin-top:5px;font-size:11.5px;color:${bn.color}">${bn.text}</div></td>
         <td style="font-size:12.5px;color:var(--text3)">${t.deadline||'—'}</td>
         <td><button class="btn sm" onclick="event.stopPropagation();openDrawer(${t.id})">詳情</button></td>
       </tr>`;
@@ -758,16 +836,93 @@ function renderTasks(){
 }
 
 // ══════════════════════════════════════
-// 核決矩陣頁
+// 核決矩陣頁（管理員/CEO 可直接編輯）
 // ══════════════════════════════════════
 function renderMatrixPage(){
-  let html = '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>代碼</th><th>文件類型</th><th>簽核流程</th><th>用印</th><th>備註</th></tr></thead><tbody>';
+  const admin = isAdmin();
+  let html = '';
+  if(admin){
+    html += '<div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="btn primary sm" onclick="openMatrixEdit(null)">+ 新增文件類型</button></div>';
+  }
+  html += '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>代碼</th><th>文件類型</th><th>簽核流程</th><th>用印</th><th>備註</th>' + (admin?'<th></th>':'') + '</tr></thead><tbody>';
   html += MATRIX_DATA.map(m => {
-    const chainTxt = '起案 → ' + m.chain.map(c => `${c.role}（${ACTION_LABEL[c.action]}）`).join(' → ');
-    return `<tr><td style="font-weight:700;color:var(--accent)">${m.code}</td><td>${esc(m.name)}</td><td style="font-size:12.5px">${chainTxt}</td><td>${m.seal}</td><td style="font-size:12px;color:var(--text3)">${esc(m.note)}</td></tr>`;
+    const chainTxt = '起案 → ' + (m.chain||[]).map(c => `${c.role}（${ACTION_LABEL[c.action]||c.action}）`).join(' → ');
+    const actions = admin ? `<td style="white-space:nowrap"><button class="btn sm" onclick="openMatrixEdit('${m.code}')">編輯</button> <button class="btn sm danger" onclick="deleteMatrixType('${m.code}')">刪除</button></td>` : '';
+    return `<tr><td style="font-weight:700;color:var(--accent)">${esc(m.code)}</td><td>${esc(m.name)}</td><td style="font-size:12.5px">${chainTxt}</td><td>${esc(m.seal)}</td><td style="font-size:12px;color:var(--text3)">${esc(m.note||'')}</td>${actions}</tr>`;
   }).join('');
   html += '</tbody></table></div>';
+  if(!admin){
+    html += '<p style="font-size:12px;color:var(--text3);margin-top:10px">只有管理員或 CEO 角色可以編輯核決矩陣。</p>';
+  }
   document.getElementById('content').innerHTML = html;
+}
+function openMatrixEdit(code){
+  editingMatrixCode = code;
+  const entry = code ? MATRIX_DATA.find(m => m.code === code) : null;
+  document.getElementById('matrixEditTitle').textContent = code ? '編輯文件類型' : '新增文件類型';
+  document.getElementById('mCode').value = entry ? entry.code : '';
+  document.getElementById('mCode').disabled = !!entry;
+  document.getElementById('mName').value = entry ? entry.name : '';
+  document.getElementById('mNote').value = entry ? (entry.note||'') : '';
+  document.getElementById('mSeal').value = entry ? entry.seal : '合約章';
+  matrixChainDraft = entry ? entry.chain.map(c => ({ role:c.role, action:c.action })) : [];
+  renderMatrixChainDraft();
+  openModalEl('matrixEditOv');
+}
+function renderMatrixChainDraft(){
+  const el = document.getElementById('mChainList');
+  if(!matrixChainDraft.length){
+    el.innerHTML = '<p style="font-size:12.5px;color:var(--text3);margin-bottom:8px">尚未設定簽核關卡，點下面「+ 新增關卡」開始。</p>';
+    return;
+  }
+  el.innerHTML = matrixChainDraft.map((c,i) => `
+    <div class="chain-item">
+      <div class="chain-order">${i+1}</div>
+      <div class="chain-body" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <select class="fi" onchange="matrixChainDraft[${i}].role=this.value">
+          ${MATRIX_ROLE_OPTIONS.map(r=>`<option value="${r}" ${r===c.role?'selected':''}>${r}</option>`).join('')}
+        </select>
+        <select class="fi" onchange="matrixChainDraft[${i}].action=this.value">
+          <option value="approve" ${c.action==='approve'?'selected':''}>核決</option>
+          <option value="countersign" ${c.action==='countersign'?'selected':''}>會簽</option>
+          <option value="notify" ${c.action==='notify'?'selected':''}>知會</option>
+        </select>
+      </div>
+      <button class="chain-remove" onclick="matrixChainDraft.splice(${i},1);renderMatrixChainDraft()">×</button>
+    </div>`).join('');
+}
+function addMatrixChainStep(){
+  matrixChainDraft.push({ role: MATRIX_ROLE_OPTIONS[0], action: 'countersign' });
+  renderMatrixChainDraft();
+}
+async function submitMatrixEdit(){
+  const code = document.getElementById('mCode').value.trim().toUpperCase();
+  const name = document.getElementById('mName').value.trim();
+  const note = document.getElementById('mNote').value.trim();
+  const seal = document.getElementById('mSeal').value;
+  if(!code){ toast('請輸入文件代碼'); return; }
+  if(!name){ toast('請輸入文件名稱'); return; }
+  if(!matrixChainDraft.length){ toast('請至少設定一個簽核關卡'); return; }
+
+  const { error } = await sb.from('matrix_types').upsert({
+    code, name, note, seal, chain: matrixChainDraft
+  }, { onConflict: 'code' });
+  if(error){ toast('儲存失敗：' + error.message); return; }
+
+  closeModal('matrixEditOv');
+  await loadMatrixData();
+  populateTypeSelect();
+  renderMatrixPage();
+  toast('✅ 已儲存「' + name + '」');
+}
+async function deleteMatrixType(code){
+  if(!confirm('確定要刪除這個文件類型嗎？已經送出的舊任務不受影響。')) return;
+  const { error } = await sb.from('matrix_types').delete().eq('code', code);
+  if(error){ toast('刪除失敗：' + error.message); return; }
+  await loadMatrixData();
+  populateTypeSelect();
+  renderMatrixPage();
+  toast('已刪除');
 }
 
 // ══════════════════════════════════════
@@ -780,6 +935,85 @@ function renderMembers(){
   ).join('');
   html += '</tbody></table></div>';
   document.getElementById('content').innerHTML = html;
+}
+
+// ══════════════════════════════════════
+// 設定頁（個人資料 / 密碼 / 同仁角色管理）
+// ══════════════════════════════════════
+const ROLE_OPTIONS = ['一般成員','Sales主管','CPM主管','FAAO主管','CEO','管理員'];
+function roleOptionsHtml(current){
+  return ROLE_OPTIONS.map(r => `<option value="${r}" ${r===current?'selected':''}>${r}</option>`).join('');
+}
+function renderSettings(){
+  let html = '<div style="max-width:560px;display:flex;flex-direction:column;gap:16px">';
+
+  html += '<div class="card">';
+  html += '<div style="font-size:14px;font-weight:700;margin-bottom:14px">個人資料</div>';
+  html += `<div class="fr"><label class="flbl">姓名</label><input class="fi" id="setName" value="${esc(me.name)}"></div>`;
+  html += `<div class="fr"><label class="flbl">部門角色（決定核決矩陣中的身份）</label><select class="fi" id="setRole">${roleOptionsHtml(me.role)}</select></div>`;
+  html += `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">登入信箱：${esc(me.email)}（無法更改）</div>`;
+  html += '<button class="btn primary sm" onclick="saveMyProfile()">儲存個人資料</button>';
+  html += '</div>';
+
+  html += '<div class="card">';
+  html += '<div style="font-size:14px;font-weight:700;margin-bottom:14px">變更密碼</div>';
+  html += '<div class="fr"><label class="flbl">新密碼</label><input class="fi" id="setPwd1" type="password" placeholder="至少 6 個字元"></div>';
+  html += '<div class="fr"><label class="flbl">確認新密碼</label><input class="fi" id="setPwd2" type="password" placeholder="再輸入一次"></div>';
+  html += '<p class="login-err" id="setPwdErr" style="display:none"></p>';
+  html += '<button class="btn primary sm" onclick="saveMyPassword()">更新密碼</button>';
+  html += '</div>';
+
+  if(me.role === '管理員' || me.role === 'CEO'){
+    html += '<div class="card">';
+    html += '<div style="font-size:14px;font-weight:700;margin-bottom:6px">同仁角色管理</div>';
+    html += '<p style="font-size:12px;color:var(--text3);margin-bottom:14px">調整同仁的部門角色，會影響「發起簽核」時核決矩陣自動帶入的人選。</p>';
+    html += '<table><thead><tr><th>姓名</th><th>信箱</th><th>角色</th><th></th></tr></thead><tbody>';
+    html += directory.map(d => `<tr>
+      <td style="font-weight:600">${esc(d.name)}</td>
+      <td style="font-family:monospace;font-size:12px;color:var(--text3)">${esc(d.email)}</td>
+      <td><select class="fi" id="roleSel_${d.id}" style="padding:6px 10px">${roleOptionsHtml(d.role)}</select></td>
+      <td><button class="btn sm" onclick="saveMemberRole('${d.id}')">儲存</button></td>
+    </tr>`).join('');
+    html += '</tbody></table></div>';
+  }
+
+  html += '</div>';
+  document.getElementById('content').innerHTML = html;
+}
+async function saveMyProfile(){
+  const name = document.getElementById('setName').value.trim();
+  const role = document.getElementById('setRole').value;
+  if(!name){ toast('請輸入姓名'); return; }
+  const { error } = await sb.from('profiles').update({ name, role }).eq('id', me.id);
+  if(error){ toast('儲存失敗：' + error.message); return; }
+  me.name = name; me.role = role;
+  document.getElementById('meAvatar').textContent = name.slice(0,2);
+  document.getElementById('meName').textContent = name;
+  document.getElementById('meRole').textContent = role;
+  await loadDirectory();
+  renderSettings();
+  toast('✅ 個人資料已更新');
+}
+async function saveMyPassword(){
+  const p1 = document.getElementById('setPwd1').value;
+  const p2 = document.getElementById('setPwd2').value;
+  const err = document.getElementById('setPwdErr');
+  err.style.display = 'none';
+  if(!p1 || p1.length < 6){ err.textContent = '密碼至少需要 6 個字元'; err.style.display = 'block'; return; }
+  if(p1 !== p2){ err.textContent = '兩次密碼輸入不一致'; err.style.display = 'block'; return; }
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  if(error){ err.textContent = mapAuthError(error.message); err.style.display = 'block'; return; }
+  document.getElementById('setPwd1').value = '';
+  document.getElementById('setPwd2').value = '';
+  toast('✅ 密碼已更新');
+}
+async function saveMemberRole(id){
+  const role = document.getElementById('roleSel_' + id).value;
+  const { error } = await sb.from('profiles').update({ role }).eq('id', id);
+  if(error){ toast('更新失敗：' + error.message + '（需要先執行角色管理的資料庫權限更新，見說明文件）'); return; }
+  await loadDirectory();
+  renderSettings();
+  toast('✅ 角色已更新');
 }
 
 // ══════════════════════════════════════
@@ -928,7 +1162,11 @@ function openDrawer(taskId){
   document.getElementById('drSub').textContent = t.type + ' · 建立於 ' + fmtDate(t.createdAt);
 
   const done = t.signers.filter(s=>s.status==='done').length;
-  let html = `<div class="d-sec"><div class="d-sec-title">任務資訊</div>
+  const bn = bottleneckInfo(t);
+  let html = `<div class="d-sec">
+    <div style="margin-bottom:10px">${stepTrackHtml(t)}</div>
+    <div style="font-size:12.5px;color:${bn.color};margin-bottom:12px">${bn.text}</div>
+    <div class="d-sec-title">任務資訊</div>
     <div style="font-size:13px;color:var(--text2);line-height:2">
       狀態：<span class="badge b-${t.status}">${STATUS_LABEL[t.status]}</span><br>
       截止日期：${t.deadline||'未設定'}<br>
