@@ -73,7 +73,7 @@ main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 
 /* ── card / panel ── */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:18px 20px}
-.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
 .stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:16px 18px;cursor:pointer;transition:.15s}
 .stat:hover{border-color:var(--accent);box-shadow:var(--sh-sm)}
 .stat .n{font-size:26px;font-weight:700;line-height:1}
@@ -124,6 +124,10 @@ tr.row-click:hover td{background:var(--surface2)}
 .chain-body select,.chain-body input{width:100%}
 .chain-warn{font-size:11px;color:var(--warn);margin-top:3px}
 .chain-remove{background:none;border:none;color:var(--text3);font-size:16px;padding:2px 6px;flex-shrink:0}
+.chain-drag{cursor:grab;color:var(--text4);font-size:15px;padding:0 2px;flex-shrink:0;user-select:none}
+.chain-drag:active{cursor:grabbing}
+.chain-item.dragging{opacity:.4}
+.chain-item[draggable="true"]{cursor:default}
 .chain-remove:hover{color:var(--danger)}
 
 /* ── drawer ── */
@@ -348,14 +352,58 @@ tr.row-click:hover td{background:var(--surface2)}
         <label class="flbl">簽核流程（依核決矩陣自動帶入，可調整人選）</label>
         <div id="chainList"></div>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn sm" onclick="addChainFromDirectory()">+ 加入內部同仁</button>
-          <button class="btn sm" onclick="addChainExternal()">+ 加入外部簽署人（廠商/客戶）</button>
+          <button class="btn sm" onclick="addChainFromDirectory('launch')">+ 加入內部同仁</button>
+          <button class="btn sm" onclick="addChainExternal('launch')">+ 加入外部簽署人（廠商/客戶）</button>
         </div>
       </div>
     </div>
     <div class="m-foot">
       <span id="launchFootMsg" style="font-size:12px;color:var(--text3)"></span>
       <button class="btn primary" id="submitLaunchBtn" onclick="submitLaunch()">送出簽核任務</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 送出前確認 Modal ══════════ -->
+<div class="ov" id="launchConfirmOv">
+  <div class="modal">
+    <div class="m-head"><h3>請確認簽核流程</h3><button class="m-close" onclick="closeModal('launchConfirmOv')">×</button></div>
+    <div class="m-body" id="launchConfirmBody"></div>
+    <div class="m-foot">
+      <button class="btn" onclick="closeModal('launchConfirmOv')">返回修改</button>
+      <button class="btn primary" onclick="doSubmitLaunch()">✓ 確認無誤，送出</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 編輯任務 Modal ══════════ -->
+<div class="ov" id="editTaskOv">
+  <div class="modal wide">
+    <div class="m-head"><h3>編輯簽核任務</h3><button class="m-close" onclick="closeModal('editTaskOv')">×</button></div>
+    <div class="m-body">
+      <div class="fr">
+        <label class="flbl">文件名稱 <span style="color:var(--danger)">*</span></label>
+        <input class="fi" id="eName" placeholder="文件名稱">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="fr"><label class="flbl">截止日期</label><input class="fi" id="eDeadline" type="date"></div>
+        <div class="fr"><label class="flbl">用印類型</label>
+          <select class="fi" id="eSeal"><option value="company">🔏 合約章</option><option value="personal">📋 便章</option></select>
+        </div>
+      </div>
+      <div class="fr"><label class="flbl">備註說明</label><textarea class="fi" id="eNote" rows="2"></textarea></div>
+      <div class="fr">
+        <label class="flbl">簽核流程（已完成的關卡鎖定無法修改，其餘可自由調整）</label>
+        <div id="editChainList"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn sm" onclick="addChainFromDirectory('edit')">+ 加入內部同仁</button>
+          <button class="btn sm" onclick="addChainExternal('edit')">+ 加入外部簽署人（廠商/客戶）</button>
+        </div>
+      </div>
+    </div>
+    <div class="m-foot">
+      <span></span>
+      <button class="btn primary" onclick="submitEditTask()">儲存變更</button>
     </div>
   </div>
 </div>
@@ -453,7 +501,10 @@ tr.row-click:hover td{background:var(--surface2)}
 <div id="drawer">
   <div class="d-head">
     <div><h3 id="drTitle" style="font-size:15px;font-weight:700"></h3><p id="drSub" style="font-size:12px;color:var(--text3);margin-top:3px"></p></div>
-    <button class="m-close" onclick="closeDrawer()">×</button>
+    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+      <button class="btn sm" id="drEditBtn" style="display:none" onclick="openEditTask(drawerTaskId)">編輯</button>
+      <button class="m-close" onclick="closeDrawer()">×</button>
+    </div>
   </div>
   <div class="d-body" id="drBody"></div>
 </div>
@@ -477,7 +528,9 @@ let directory = [];         // 全公司同仁 profiles
 let tasks = [];             // 任務(含簽署人)清單
 let currentPage = 'dash';
 let loginMode = 'login'; // 'login' | 'signup' | 'forgot'
-let chainData = [];         // 發起簽核時目前的簽核鏈
+let chainStores = { launch: [], edit: [] };  // 發起簽核 / 編輯任務 共用的簽核鏈資料
+let dragFromIndex = null;                     // 拖曳排序時記錄起始位置
+const CHAIN_CONFIG = { launch: { containerId: 'chainList' }, edit: { containerId: 'editChainList' } };
 let launchFilesDraft = [];  // 發起簽核時選擇的附件（File 物件陣列）
 let stampState = null;      // PDF 蓋章 Modal 目前的狀態
 let mySigTab = 'draw';      // 設定頁「我的簽名」目前選到的分頁
@@ -732,7 +785,7 @@ async function loadTasks(){
   tasks = (taskRows||[]).map(t => ({
     id: t.id, name: t.name, type: t.type, typeCode: t.type_code,
     deadline: t.deadline, note: t.note, sealType: t.seal_type, status: t.status,
-    createdBy: t.created_by_name, createdAt: t.created_at,
+    createdBy: t.created_by_name, createdById: t.created_by, createdAt: t.created_at,
     signers: (signerRows||[]).filter(s => s.task_id === t.id).map(s => ({
       id: s.id, name: s.name, email: s.email, role: s.role, action: s.action,
       orderIndex: s.order_index, status: s.status, notify: s.notify,
@@ -788,20 +841,27 @@ function goPage(p){
 // ══════════════════════════════════════
 // 工作總覽
 // ══════════════════════════════════════
+let taskListFilter = 'all';
+function setTaskFilter(mode){
+  taskListFilter = mode;
+  goPage('tasks');
+}
 function renderDash(){
   const myTurn = tasks.filter(t => t.signers.some(s => s.status==='signing' && s.email===me.email));
   const inProgress = tasks.filter(t => t.status==='signing');
   const doneCnt = tasks.filter(t => t.status==='done').length;
   const overdue = tasks.filter(t => t.deadline && t.status!=='done' && new Date(t.deadline) < new Date()).length;
+  const notifyMe = tasks.filter(t => t.signers.some(s => s.notify && s.email===me.email));
 
   const stats = [
-    { n: myTurn.length, l: '待我簽署', c: 'var(--danger)' },
-    { n: inProgress.length, l: '進行中任務', c: 'var(--accent)' },
-    { n: overdue, l: '已逾期', c: 'var(--warn)' },
-    { n: doneCnt, l: '累計完成', c: 'var(--ok)' },
+    { n: myTurn.length, l: '待我簽署', c: 'var(--danger)', mode: 'myTurn' },
+    { n: inProgress.length, l: '進行中任務', c: 'var(--accent)', mode: 'inProgress' },
+    { n: overdue, l: '已逾期', c: 'var(--warn)', mode: 'overdue' },
+    { n: doneCnt, l: '累計完成', c: 'var(--ok)', mode: 'done' },
+    { n: notifyMe.length, l: '知會文件（我被通知的）', c: 'var(--info, #6054C8)', mode: 'notifyMe' },
   ];
   let html = '<div class="stat-grid">' + stats.map(s =>
-    `<div class="stat"><div class="n" style="color:${s.c}">${s.n}</div><div class="l">${s.l}</div></div>`
+    `<div class="stat" onclick="setTaskFilter('${s.mode}')"><div class="n" style="color:${s.c}">${s.n}</div><div class="l">${s.l}</div></div>`
   ).join('') + '</div>';
 
   html += '<div class="card"><div style="font-size:14px;font-weight:700;margin-bottom:12px">待我處理的簽核</div>';
@@ -873,13 +933,35 @@ function bottleneckInfo(t){
 // ══════════════════════════════════════
 // 簽核任務列表
 // ══════════════════════════════════════
+const FILTER_LABEL = {
+  all: '全部任務', myTurn: '待我簽署', inProgress: '進行中任務',
+  overdue: '已逾期', done: '累計完成', notifyMe: '知會文件（我被通知的）'
+};
+function applyTaskFilter(list){
+  const now = new Date();
+  switch(taskListFilter){
+    case 'myTurn': return list.filter(t => t.signers.some(s => s.status==='signing' && s.email===me.email));
+    case 'inProgress': return list.filter(t => t.status==='signing');
+    case 'overdue': return list.filter(t => t.deadline && t.status!=='done' && new Date(t.deadline) < now);
+    case 'done': return list.filter(t => t.status==='done');
+    case 'notifyMe': return list.filter(t => t.signers.some(s => s.notify && s.email===me.email));
+    default: return list;
+  }
+}
 function renderTasks(){
   let html = '';
-  if(!tasks.length){
-    html = '<div class="empty"><h4>目前沒有任何簽核任務</h4><p>點右上角「發起簽核」建立第一筆任務</p></div>';
+  if(taskListFilter !== 'all'){
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:9px 14px;background:var(--accent-soft);border-radius:var(--r);font-size:12.5px;color:var(--accent2)">
+      篩選中：<b>${FILTER_LABEL[taskListFilter]||taskListFilter}</b>
+      <button class="btn sm" style="margin-left:auto" onclick="setTaskFilter('all')">清除篩選</button>
+    </div>`;
+  }
+  const list = applyTaskFilter(tasks);
+  if(!list.length){
+    html += '<div class="empty"><h4>' + (taskListFilter==='all' ? '目前沒有任何簽核任務' : '這個篩選條件下沒有任務') + '</h4><p>' + (taskListFilter==='all' ? '點右上角「發起簽核」建立第一筆任務' : '') + '</p></div>';
   } else {
-    html = '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>文件名稱</th><th>狀態</th><th>簽核進度</th><th>截止日</th><th></th></tr></thead><tbody>';
-    html += tasks.map(t => {
+    html += '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>文件名稱</th><th>狀態</th><th>簽核進度</th><th>截止日</th><th></th></tr></thead><tbody>';
+    html += list.map(t => {
       const bClass = 'b-' + (t.status==='signing'?'signing':t.status);
       const bn = bottleneckInfo(t);
       return `<tr class="row-click" onclick="openDrawer(${t.id})">
@@ -1173,10 +1255,10 @@ function openLaunch(){
   document.getElementById('lSeal').value = 'company';
   const d = new Date(); d.setDate(d.getDate()+14);
   document.getElementById('lDeadline').value = d.toISOString().split('T')[0];
-  chainData = [];
+  chainStores.launch = [];
   launchFilesDraft = [];
   document.getElementById('lFileInput').value = '';
-  renderChainList();
+  renderChainStore('launch');
   renderLaunchFileList();
   openModalEl('launchOv');
 }
@@ -1214,97 +1296,140 @@ function onTypeChange(code){
   const entry = MATRIX_DATA.find(m => m.code === code);
   if(!entry) return;
   document.getElementById('lSeal').value = entry.seal === '合約章' ? 'company' : 'personal';
-  chainData = entry.chain.map(step => {
-    const matches = directory.filter(d => d.role === step.role);
+  chainStores.launch = entry.chain.map(step => {
+    const match = directory.find(d => d.role === step.role);
     return {
-      role: step.role, action: step.action,
-      candidateId: matches[0]?.id || '',
-      candidates: matches,
-      name: matches[0]?.name || '', email: matches[0]?.email || '',
-      external: false
+      personId: match ? match.id : '', name: match ? match.name : '', email: match ? match.email : '',
+      role: step.role, action: step.action, external: false, locked: false
     };
   });
-  renderChainList();
+  renderChainStore('launch');
 }
-function renderChainList(){
-  const el = document.getElementById('chainList');
-  if(!chainData.length){
-    el.innerHTML = '<p style="font-size:12.5px;color:var(--text3)">請先選擇文件類型，或手動加入簽署人</p>';
+function renderChainStore(key){
+  const cfg = CHAIN_CONFIG[key];
+  const el = document.getElementById(cfg.containerId);
+  if(!el) return;
+  const arr = chainStores[key];
+  if(!arr.length){
+    el.innerHTML = '<p style="font-size:12.5px;color:var(--text3)">' + (key==='launch' ? '請先選擇文件類型，或手動加入簽署人' : '目前沒有尚未完成的簽核關卡') + '</p>';
     return;
   }
-  el.innerHTML = chainData.map((c, i) => {
-    if(c.external){
-      return `<div class="chain-item">
-        <div class="chain-order">${i+1}</div>
-        <div class="chain-body">
-          <input class="fi" placeholder="姓名" value="${esc(c.name)}" oninput="chainData[${i}].name=this.value" style="margin-bottom:6px">
-          <input class="fi" placeholder="Email（外部不限網域）" value="${esc(c.email)}" oninput="chainData[${i}].email=this.value">
-          <div class="chip-role" style="margin-top:6px;display:inline-block">外部簽署人</div>
-        </div>
-        <button class="chain-remove" onclick="removeChain(${i})">×</button>
+  el.innerHTML = arr.map((c,i) => {
+    if(c.locked){
+      return `<div class="chain-item" style="opacity:.65;background:var(--surface3)">
+        <div class="chain-order" style="background:var(--ok)">✓</div>
+        <div class="chain-body"><div style="font-weight:600;font-size:13px">${esc(c.name)}</div><div style="font-size:11px;color:var(--text3)">${esc(c.role||'')} · 已完成，無法修改</div></div>
+        <span class="chip-role ${c.action}">${ACTION_LABEL[c.action]||''}</span>
       </div>`;
     }
-    if(!c.candidates || !c.candidates.length){
-      return `<div class="chain-item">
-        <div class="chain-order">${i+1}</div>
-        <div class="chain-body">
-          <select class="fi" onchange="pickChainCandidate(${i}, this.value)">
-            <option value="">— 選擇同仁 —</option>
-            ${directory.map(d=>`<option value="${d.id}">${esc(d.name)}（${esc(d.role)}）</option>`).join('')}
-          </select>
-          <div class="chain-warn">⚠️ 尚無「${c.role}」角色的同仁，請手動指定人選</div>
-        </div>
-        <span class="chip-role ${c.action}">${ACTION_LABEL[c.action]}</span>
-        <button class="chain-remove" onclick="removeChain(${i})">×</button>
-      </div>`;
-    }
-    return `<div class="chain-item">
+    const personField = c.external
+      ? `<input class="fi" placeholder="姓名" value="${esc(c.name)}" oninput="chainStores.${key}[${i}].name=this.value" style="margin-bottom:6px">
+         <input class="fi" placeholder="Email（外部不限網域）" value="${esc(c.email)}" oninput="chainStores.${key}[${i}].email=this.value">`
+      : `<select class="fi" onchange="pickChainPerson('${key}',${i},this.value)">
+           <option value="">— 選擇同仁 —</option>
+           ${directory.map(d=>`<option value="${d.id}" ${d.id===c.personId?'selected':''}>${esc(d.name)}（${esc(d.role)}）</option>`).join('')}
+         </select>
+         ${c.email?`<div style="font-size:11px;color:var(--text3);margin-top:3px">${esc(c.email)}</div>`:'<div class="chain-warn">請選擇一位同仁</div>'}`;
+    const actionSelect = `<select class="fi" style="margin-top:6px" onchange="chainStores.${key}[${i}].action=this.value">
+        <option value="approve" ${c.action==='approve'?'selected':''}>核決</option>
+        <option value="countersign" ${c.action==='countersign'?'selected':''}>會簽</option>
+        <option value="notify" ${c.action==='notify'?'selected':''}>知會</option>
+      </select>`;
+    return `<div class="chain-item" draggable="true" ondragstart="chainDragStart(event,${i})" ondragover="chainDragOver(event)" ondrop="chainDrop('${key}',event,${i})" ondragend="chainDragEnd(event)">
+      <span class="chain-drag" title="拖曳調整順序">⠿</span>
       <div class="chain-order">${i+1}</div>
-      <div class="chain-body">
-        <select class="fi" onchange="pickChainCandidate(${i}, this.value)">
-          ${c.candidates.map(d=>`<option value="${d.id}" ${d.id===c.candidateId?'selected':''}>${esc(d.name)}</option>`).join('')}
-        </select>
-        <div style="font-size:11px;color:var(--text3);margin-top:3px">${esc(c.email)}</div>
-      </div>
-      <span class="chip-role ${c.action}">${ACTION_LABEL[c.action]}</span>
-      <button class="chain-remove" onclick="removeChain(${i})">×</button>
+      <div class="chain-body">${personField}${c.external?'<div class="chip-role" style="margin-top:6px;display:inline-block">外部簽署人</div>':''}${actionSelect}</div>
+      <button class="chain-remove" onclick="removeChainItem('${key}',${i})">×</button>
     </div>`;
   }).join('');
 }
-function pickChainCandidate(i, id){
-  const d = directory.find(x=>x.id===id);
+function pickChainPerson(key, i, personId){
+  const arr = chainStores[key];
+  if(!personId){ arr[i].personId=''; arr[i].name=''; arr[i].email=''; renderChainStore(key); return; }
+  const d = directory.find(x=>x.id===personId);
   if(!d) return;
-  chainData[i].candidateId = id;
-  chainData[i].name = d.name;
-  chainData[i].email = d.email;
-  renderChainList();
+  arr[i].personId = personId;
+  arr[i].name = d.name;
+  arr[i].email = d.email;
+  arr[i].role = d.role;
+  renderChainStore(key);
 }
-function addChainFromDirectory(){
-  chainData.push({ role:'', action:'countersign', candidateId:'', candidates:directory, name:'', email:'', external:false });
-  renderChainList();
+function addChainFromDirectory(key){
+  chainStores[key].push({ personId:'', name:'', email:'', role:'', action:'countersign', external:false, locked:false });
+  renderChainStore(key);
 }
-function addChainExternal(){
-  chainData.push({ role:'外部', action:'countersign', name:'', email:'', external:true });
-  renderChainList();
+function addChainExternal(key){
+  chainStores[key].push({ personId:'', name:'', email:'', role:'外部', action:'countersign', external:true, locked:false });
+  renderChainStore(key);
 }
-function removeChain(i){
-  chainData.splice(i,1);
-  renderChainList();
+function removeChainItem(key, i){
+  chainStores[key].splice(i,1);
+  renderChainStore(key);
 }
-async function submitLaunch(){
+function chainDragStart(e, i){
+  dragFromIndex = i;
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+function chainDragOver(e){
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+function chainDrop(key, e, i){
+  e.preventDefault();
+  if(dragFromIndex === null || dragFromIndex === i) return;
+  const arr = chainStores[key];
+  const [moved] = arr.splice(dragFromIndex, 1);
+  arr.splice(i, 0, moved);
+  dragFromIndex = null;
+  renderChainStore(key);
+}
+function chainDragEnd(e){
+  e.currentTarget.classList.remove('dragging');
+  dragFromIndex = null;
+}
+function submitLaunch(){
+  const name = document.getElementById('lName').value.trim();
+  const typeCode = document.getElementById('lType').value;
+  const typeEntry = MATRIX_DATA.find(m=>m.code===typeCode);
+  const deadline = document.getElementById('lDeadline').value;
+  const seal = document.getElementById('lSeal').value;
+  const arr = chainStores.launch;
+
+  if(!name){ toast('請填寫文件名稱'); return; }
+  if(!typeCode){ toast('請選擇文件類型'); return; }
+  if(!arr.length){ toast('請至少設定一位簽署人'); return; }
+  const invalid = arr.find(c => !c.name || !c.email);
+  if(invalid){ toast('請完整填寫每一位簽署人的姓名與 Email'); return; }
+
+  const sealLabel = seal === 'personal' ? '便章' : '合約章';
+  let html = `<div style="margin-bottom:10px"><b>文件名稱：</b>${esc(name)}</div>`;
+  html += `<div style="margin-bottom:10px"><b>文件類型：</b>${esc(typeEntry ? typeEntry.name : typeCode)}</div>`;
+  html += `<div style="margin-bottom:10px"><b>用印類型：</b>${sealLabel}</div>`;
+  html += `<div style="margin-bottom:10px"><b>截止日期：</b>${deadline||'未設定'}</div>`;
+  html += `<div style="margin-bottom:10px"><b>附件：</b>${launchFilesDraft.length} 個檔案</div>`;
+  html += '<div><b>簽核流程：</b><div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">';
+  html += arr.map((c,i) => `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--surface3);border-radius:var(--r)">
+    <span style="width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</span>
+    <span style="font-size:13px;font-weight:500">${esc(c.name)}</span>
+    <span style="font-size:11px;color:var(--text3)">${esc(c.email)}</span>
+    <span class="chip-role ${c.action}" style="margin-left:auto">${ACTION_LABEL[c.action]||''}</span>
+  </div>`).join('');
+  html += '</div></div>';
+  document.getElementById('launchConfirmBody').innerHTML = html;
+  openModalEl('launchConfirmOv');
+}
+async function doSubmitLaunch(){
+  closeModal('launchConfirmOv');
   const name = document.getElementById('lName').value.trim();
   const typeCode = document.getElementById('lType').value;
   const typeEntry = MATRIX_DATA.find(m=>m.code===typeCode);
   const deadline = document.getElementById('lDeadline').value;
   const note = document.getElementById('lNote').value.trim();
   const seal = document.getElementById('lSeal').value;
+  const arr = chainStores.launch;
 
-  if(!name){ toast('請填寫文件名稱'); return; }
-  if(!chainData.length){ toast('請至少設定一位簽署人'); return; }
-  const invalid = chainData.find(c => !c.name || !c.email);
-  if(invalid){ toast('請完整填寫每一位簽署人的姓名與 Email'); return; }
-
-  const signersPayload = chainData.map(c => ({
+  const signersPayload = arr.map(c => ({
     name: c.name, email: c.email, role: c.role, action: c.action, notify: c.action === 'notify'
   }));
 
@@ -1350,6 +1475,65 @@ async function submitLaunch(){
 }
 
 // ══════════════════════════════════════
+// 編輯任務
+// ══════════════════════════════════════
+let editingTaskId = null;
+function canEditTask(t){
+  if(!t) return false;
+  if(t.status !== 'signing') return false;
+  return isAdmin() || t.createdById === me.id;
+}
+function openEditTask(taskId){
+  const t = tasks.find(x=>x.id===taskId);
+  if(!t || !canEditTask(t)){ toast('您沒有權限編輯此任務，或此任務目前無法編輯'); return; }
+  editingTaskId = taskId;
+  document.getElementById('eName').value = t.name;
+  document.getElementById('eDeadline').value = t.deadline || '';
+  document.getElementById('eNote').value = t.note || '';
+  document.getElementById('eSeal').value = t.sealType || 'company';
+
+  chainStores.edit = t.signers.map(s => {
+    const match = directory.find(d => d.email === s.email);
+    return {
+      personId: match ? match.id : '', name: s.name, email: s.email, role: s.role, action: s.action,
+      external: !match, locked: s.status === 'done'
+    };
+  });
+  renderChainStore('edit');
+  closeDrawer();
+  openModalEl('editTaskOv');
+}
+async function submitEditTask(){
+  if(!editingTaskId) return;
+  const name = document.getElementById('eName').value.trim();
+  const deadline = document.getElementById('eDeadline').value;
+  const note = document.getElementById('eNote').value.trim();
+  const seal = document.getElementById('eSeal').value;
+  const arr = chainStores.edit;
+
+  if(!name){ toast('請填寫文件名稱'); return; }
+  const editable = arr.filter(c => !c.locked);
+  const invalid = editable.find(c => !c.name || !c.email);
+  if(invalid){ toast('請完整填寫每一位簽署人的姓名與 Email'); return; }
+
+  const signersPayload = editable.map(c => ({
+    name: c.name, email: c.email, role: c.role, action: c.action, notify: c.action === 'notify'
+  }));
+
+  const { error } = await sb.rpc('update_task_chain', {
+    p_task_id: editingTaskId, p_name: name, p_deadline: deadline || null,
+    p_note: note, p_seal_type: seal, p_signers: signersPayload
+  });
+  if(error){ toast('儲存失敗：' + error.message); return; }
+
+  closeModal('editTaskOv');
+  await loadTasks();
+  if(currentPage==='tasks') renderTasks();
+  if(currentPage==='dash') renderDash();
+  toast('✅ 任務已更新');
+}
+
+// ══════════════════════════════════════
 // 任務詳情 Drawer
 // ══════════════════════════════════════
 let drawerTaskId = null;
@@ -1359,6 +1543,7 @@ function openDrawer(taskId){
   if(!t) return;
   document.getElementById('drTitle').textContent = t.name;
   document.getElementById('drSub').textContent = t.type + ' · 建立於 ' + fmtDate(t.createdAt);
+  document.getElementById('drEditBtn').style.display = canEditTask(t) ? 'inline-flex' : 'none';
 
   const done = t.signers.filter(s=>s.status==='done').length;
   const bn = bottleneckInfo(t);
