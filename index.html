@@ -131,10 +131,10 @@ tr.row-click:hover td{background:var(--surface2)}
 .chain-remove:hover{color:var(--danger)}
 
 /* ── drawer（改為置中的完整視窗）── */
-#drawerOv{position:fixed;inset:0;background:rgba(10,18,28,.45);backdrop-filter:blur(2px);z-index:400;display:none;align-items:center;justify-content:center;padding:24px}
-#drawerOv.open{display:flex}
-#drawer{position:relative;width:960px;max-width:100%;max-height:92vh;background:var(--surface);border-radius:var(--rxl);z-index:401;box-shadow:var(--sh-lg);overflow-y:auto;transform:scale(.97);opacity:0;transition:transform .18s,opacity .18s}
-#drawerOv.open #drawer{transform:scale(1);opacity:1}
+#drawerOv{position:fixed;inset:0;background:rgba(10,18,28,.45);backdrop-filter:blur(2px);z-index:400;display:none}
+#drawerOv.open{display:block}
+#drawer{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);width:960px;max-width:92vw;max-height:92vh;background:var(--surface);border-radius:var(--rxl);z-index:401;box-shadow:var(--sh-lg);overflow-y:auto;opacity:0;visibility:hidden;transition:transform .18s,opacity .18s}
+#drawer.open{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
 .d-head{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;position:sticky;top:0;background:var(--surface);z-index:1;border-radius:var(--rxl) var(--rxl) 0 0}
 .d-body{padding:22px 24px;display:grid;grid-template-columns:1.3fr 1fr;gap:28px}
 .d-body-col{min-width:0}
@@ -298,7 +298,12 @@ tr.row-click:hover td{background:var(--surface2)}
 
   <main>
     <div class="topbar">
-      <div><h1 id="pgTitle">工作總覽</h1><p id="pgSub">Blutech Inc. 智能行政核決系統</p></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="btn sm" id="backBtn" onclick="goBack()" style="display:none" title="返回上一頁">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>上一頁
+        </button>
+        <div><h1 id="pgTitle">工作總覽</h1><p id="pgSub">Blutech Inc. 智能行政核決系統</p></div>
+      </div>
       <button class="btn primary" onclick="openLaunch()">
         <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4"/></svg>發起簽核
       </button>
@@ -548,6 +553,7 @@ let launchFilesDraft = [];  // 發起簽核時選擇的附件（File 物件陣�
 let stampState = null;      // PDF 蓋章 Modal 目前的狀態
 let mySigTab = 'draw';      // 設定頁「我的簽名」目前選到的分頁
 let mySigFileData = null;   // 插入檔案模式下，使用者選擇的圖檔 dataURL
+let mySignatures = [];      // 使用者的簽名庫（多組）
 let signingContext = null;  // { taskId, signerId }
 let drawing = false;
 
@@ -749,7 +755,7 @@ async function afterLogin(){
   }
 
   me = { id: user.id, email: user.email, name: profile?.name || user.email, role: profile?.role || '一般成員',
-         defaultSigType: profile?.default_signature_type || null, defaultSigData: profile?.default_signature_data || null };
+         defaultSigType: null, defaultSigData: null };
 
   document.getElementById('loginPage').style.display = 'none';
   document.getElementById('appRoot').classList.add('show');
@@ -760,7 +766,10 @@ async function afterLogin(){
   await loadDirectory();
   await loadTasks();
   await loadMatrixData();
+  await loadMySignatures();
   populateTypeSelect();
+  appNavDepth = 0;
+  window.history.replaceState({ page: 'dash', depth: 0 }, '', '#dash');
   goPage('dash');
   subscribeRealtime();
   toast('☁️ 已登入，' + me.name + ' 您好');
@@ -838,7 +847,8 @@ const PAGE_META = {
   members:{ title:'同仁名冊', sub:'公司登入帳號與角色列表' },
   settings:{ title:'設定', sub:'個人資料、密碼與角色管理' },
 };
-function goPage(p){
+let appNavDepth = 0;
+function goPage(p, fromHistory, depth){
   currentPage = p;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   const navEl = document.querySelector(`.nav-item[data-page="${p}"]`);
@@ -850,7 +860,26 @@ function goPage(p){
   if(p==='matrix') renderMatrixPage();
   if(p==='members') renderMembers();
   if(p==='settings') renderSettings();
+
+  if(!fromHistory){
+    if(!(window.history.state && window.history.state.page === p)){
+      appNavDepth++;
+      window.history.pushState({ page: p, depth: appNavDepth }, '', '#' + p);
+    }
+  } else if(typeof depth === 'number'){
+    appNavDepth = depth;
+  }
+  document.getElementById('backBtn').style.display = appNavDepth > 0 ? 'inline-flex' : 'none';
 }
+function goBack(){
+  window.history.back();
+}
+window.addEventListener('popstate', (e) => {
+  if(!me) return; // 尚未登入時不處理（避免登入頁被 popstate 影響）
+  const p = (e.state && e.state.page) || 'dash';
+  const depth = (e.state && typeof e.state.depth === 'number') ? e.state.depth : 0;
+  goPage(p, true, depth);
+});
 
 // ══════════════════════════════════════
 // 工作總覽
@@ -1112,11 +1141,30 @@ function renderSettings(){
   html += '</div>';
 
   html += '<div class="card">';
-  html += '<div style="font-size:14px;font-weight:700;margin-bottom:6px">我的預設簽名</div>';
-  html += '<p style="font-size:12px;color:var(--text3);margin-bottom:12px">設定好之後，簽署文件或在 PDF 上蓋章時可以一鍵套用，不用每次重畫。</p>';
-  if(me.defaultSigData){
-    html += `<div style="border:1.5px solid var(--border);border-radius:10px;padding:14px;text-align:center;margin-bottom:12px;background:var(--surface2)"><img src="${me.defaultSigData}" style="max-height:70px;max-width:100%"></div>`;
+  html += '<div style="font-size:14px;font-weight:700;margin-bottom:6px">我的簽名</div>';
+  html += '<p style="font-size:12px;color:var(--text3);margin-bottom:14px">可以存多組簽名（例如正式簽名 + 印章圖檔），自選一組當預設，簽署或蓋章時會直接套用。</p>';
+
+  html += '<div id="mySigList" style="margin-bottom:16px">';
+  if(!mySignatures.length){
+    html += '<p style="font-size:12.5px;color:var(--text3)">尚未建立任何簽名，請在下方新增第一組。</p>';
+  } else {
+    html += mySignatures.map(s => `
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1.5px solid ${s.is_default?'var(--accent)':'var(--border)'};border-radius:10px;margin-bottom:8px;background:${s.is_default?'var(--accent-soft)':'var(--surface)'}">
+        <img src="${s.data}" style="height:38px;max-width:90px;object-fit:contain;background:#fff;border-radius:6px;padding:3px;border:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <input class="fi" style="padding:5px 9px;font-size:13px" value="${esc(s.name)}" onchange="renameSignature(${s.id}, this.value)">
+        </div>
+        ${s.is_default
+          ? '<span class="chip-role countersign" style="flex-shrink:0">目前預設</span>'
+          : `<button class="btn sm" style="flex-shrink:0" onclick="setDefaultSignature(${s.id})">設為預設</button>`}
+        <button class="btn sm danger" style="flex-shrink:0" onclick="deleteSignature(${s.id})">刪除</button>
+      </div>`).join('');
   }
+  html += '</div>';
+
+  html += '<div style="border-top:1px solid var(--border);padding-top:14px">';
+  html += '<div style="font-size:13px;font-weight:600;margin-bottom:10px">+ 新增簽名</div>';
+  html += `<div class="fr"><label class="flbl">簽名名稱</label><input class="fi" id="newSigName" placeholder="例如：正式簽名、公司印章"></div>`;
   html += '<div class="sign-tabs">';
   html += `<div class="sign-tab ${mySigTab==='draw'?'active':''}" id="myTabDraw" onclick="switchMySigTab('draw')">✍️ 手寫簽名</div>`;
   html += `<div class="sign-tab ${mySigTab==='type'?'active':''}" id="myTabType" onclick="switchMySigTab('type')">Aa 打字簽名</div>`;
@@ -1130,7 +1178,8 @@ function renderSettings(){
     <button class="btn sm" type="button" onclick="document.getElementById('mySigFileInput').click()">選擇圖檔</button>
     <div id="mySigFilePreview" style="margin-top:10px"></div>
   </div>`;
-  html += '<button class="btn primary sm" style="margin-top:12px" onclick="saveMyDefaultSignature()">儲存為我的預設簽名</button>';
+  html += '<button class="btn primary sm" style="margin-top:12px" onclick="saveNewSignature()">新增這組簽名</button>';
+  html += '</div>';
   html += '</div>';
 
   html += '<div class="card">';
@@ -1221,7 +1270,9 @@ function handleMySigFile(input){
   };
   reader.readAsDataURL(f);
 }
-async function saveMyDefaultSignature(){
+async function saveNewSignature(){
+  const name = document.getElementById('newSigName').value.trim();
+  if(!name){ toast('請輸入簽名名稱'); return; }
   let dataUrl, type;
   if(mySigTab === 'draw'){
     const cv = document.getElementById('mySigCanvas');
@@ -1236,12 +1287,59 @@ async function saveMyDefaultSignature(){
     if(!v){ toast('請輸入簽名文字'); return; }
     dataUrl = textToSignaturePng(v); type = 'type';
   }
-  const { error } = await sb.from('profiles').update({ default_signature_type: type, default_signature_data: dataUrl }).eq('id', me.id);
-  if(error){ toast('儲存失敗：' + error.message); return; }
-  me.defaultSigType = type; me.defaultSigData = dataUrl;
+  const makeDefault = mySignatures.length === 0; // 第一組簽名自動設為預設
+  const { error } = await sb.from('user_signatures').insert({
+    user_id: me.id, name, type, data: dataUrl, is_default: makeDefault
+  });
+  if(error){ toast('新增失敗：' + error.message); return; }
   mySigFileData = null;
-  toast('✅ 已儲存您的預設簽名');
+  document.getElementById('newSigName').value = '';
+  toast('✅ 已新增簽名「' + name + '」');
+  await loadMySignatures();
   renderSettings();
+}
+async function loadMySignatures(){
+  const { data, error } = await sb.from('user_signatures').select('*').eq('user_id', me.id).order('created_at');
+  if(error){ console.error(error); return; }
+  mySignatures = data || [];
+  syncDefaultSig();
+}
+function syncDefaultSig(){
+  const def = mySignatures.find(s => s.is_default) || mySignatures[0];
+  me.defaultSigType = def ? def.type : null;
+  me.defaultSigData = def ? def.data : null;
+}
+async function setDefaultSignature(id){
+  await sb.from('user_signatures').update({ is_default: false }).eq('user_id', me.id).eq('is_default', true);
+  const { error } = await sb.from('user_signatures').update({ is_default: true }).eq('id', id);
+  if(error){ toast('設定失敗：' + error.message); return; }
+  await loadMySignatures();
+  renderSettings();
+  toast('✅ 已設為預設簽名');
+}
+async function renameSignature(id, newName){
+  const name = newName.trim();
+  if(!name){ toast('名稱不可為空'); renderSettings(); return; }
+  const { error } = await sb.from('user_signatures').update({ name }).eq('id', id);
+  if(error){ toast('更新失敗：' + error.message); return; }
+  const s = mySignatures.find(x=>x.id===id);
+  if(s) s.name = name;
+  toast('✅ 名稱已更新');
+}
+async function deleteSignature(id){
+  const s = mySignatures.find(x=>x.id===id);
+  if(!s) return;
+  if(!confirm(`確定要刪除「${s.name}」這組簽名嗎？`)) return;
+  const { error } = await sb.from('user_signatures').delete().eq('id', id);
+  if(error){ toast('刪除失敗：' + error.message); return; }
+  const wasDefault = s.is_default;
+  await loadMySignatures();
+  if(wasDefault && mySignatures.length){
+    await setDefaultSignature(mySignatures[0].id);
+    return;
+  }
+  renderSettings();
+  toast('已刪除');
 }
 async function saveMyProfile(){
   const name = document.getElementById('setName').value.trim();
