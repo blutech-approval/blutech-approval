@@ -49,7 +49,7 @@ aside{width:224px;min-width:224px;background:linear-gradient(180deg,var(--sb),va
 .nav-badge{margin-left:auto;background:var(--danger);color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px}
 .user-card{padding:12px;border-top:1px solid rgba(255,255,255,.08)}
 .user-row{display:flex;align-items:center;gap:9px}
-.avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}
 .user-info p{font-size:12.5px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
 .user-info span{font-size:10.5px;color:rgba(255,255,255,.4)}
 .logout-btn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,.4);padding:4px}
@@ -282,7 +282,7 @@ tr.row-click:hover td{background:var(--surface2)}
       <div class="nav-item" data-page="members" onclick="goPage('members')">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>同仁名冊
       </div>
-      <div class="nav-lbl">帳號</div>
+      <div class="nav-lbl">系統</div>
       <div class="nav-item" data-page="settings" onclick="goPage('settings')">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>設定
       </div>
@@ -353,10 +353,14 @@ tr.row-click:hover td{background:var(--surface2)}
       </div>
       <div class="fr">
         <label class="flbl">可見範圍</label>
-        <select class="fi" id="lVisibility">
+        <select class="fi" id="lVisibility" onchange="toggleVisibilityRoles('l')">
           <option value="all">🌐 全部同仁可見</option>
           <option value="private">🔒 只有相關人員可見（起案人／簽核人／管理員）</option>
         </select>
+        <div id="lVisibilityRoles" style="display:none;margin-top:8px;padding:10px 12px;background:var(--surface2);border-radius:10px">
+          <div style="font-size:11.5px;color:var(--text3);margin-bottom:6px">除了起案人／簽核人／管理員以外，額外讓以下角色也能看到（可複選，非必填）：</div>
+          <div id="lRoleChecks" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+        </div>
       </div>
       <div class="fr">
         <label class="flbl">備註說明</label>
@@ -419,10 +423,14 @@ tr.row-click:hover td{background:var(--surface2)}
       <div class="fr"><label class="flbl">備註說明</label><textarea class="fi" id="eNote" rows="2"></textarea></div>
       <div class="fr">
         <label class="flbl">可見範圍</label>
-        <select class="fi" id="eVisibility">
+        <select class="fi" id="eVisibility" onchange="toggleVisibilityRoles('e')">
           <option value="all">🌐 全部同仁可見</option>
           <option value="private">🔒 只有相關人員可見（起案人／簽核人／管理員）</option>
         </select>
+        <div id="eVisibilityRoles" style="display:none;margin-top:8px;padding:10px 12px;background:var(--surface2);border-radius:10px">
+          <div style="font-size:11.5px;color:var(--text3);margin-bottom:6px">除了起案人／簽核人／管理員以外，額外讓以下角色也能看到（可複選，非必填）：</div>
+          <div id="eRoleChecks" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+        </div>
       </div>
       <div class="fr">
         <label class="flbl">簽核流程（已完成的關卡鎖定無法修改，其餘可自由調整）</label>
@@ -836,11 +844,11 @@ async function afterLogin(){
   }
 
   me = { id: user.id, email: user.email, name: profile?.name || user.email, role: profile?.role || '一般成員',
-         defaultSigType: null, defaultSigData: null };
+         defaultSigType: null, defaultSigData: null, avatarUrl: profile?.avatar_url || null };
 
   document.getElementById('loginPage').style.display = 'none';
   document.getElementById('appRoot').classList.add('show');
-  document.getElementById('meAvatar').textContent = me.name.slice(0,2);
+  updateSidebarAvatar();
   document.getElementById('meName').textContent = me.name;
   document.getElementById('meRole').textContent = me.role;
 
@@ -891,7 +899,7 @@ async function loadTasks(){
   tasks = (taskRows||[]).map(t => ({
     id: t.id, name: t.name, type: t.type, typeCode: t.type_code,
     deadline: t.deadline, note: t.note, sealType: t.seal_type, status: t.status,
-    createdBy: t.created_by_name, createdById: t.created_by, createdAt: t.created_at, isPrivate: t.is_private,
+    createdBy: t.created_by_name, createdById: t.created_by, createdAt: t.created_at, isPrivate: t.is_private, visibleRoles: t.visible_roles || [],
     signers: (signerRows||[]).filter(s => s.task_id === t.id).map(s => ({
       id: s.id, name: s.name, email: s.email, role: s.role, action: s.action,
       orderIndex: s.order_index, status: s.status, notify: s.notify,
@@ -1376,10 +1384,13 @@ async function deleteMatrixType(code){
 // 同仁名冊頁
 // ══════════════════════════════════════
 function renderMembers(){
-  let html = '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>姓名</th><th>信箱</th><th>角色</th></tr></thead><tbody>';
-  html += directory.map(m =>
-    `<tr><td style="font-weight:600">${esc(m.name)}</td><td style="font-family:monospace;font-size:12.5px;color:var(--text3)">${esc(m.email)}</td><td><span class="chip-role">${esc(m.role)}</span></td></tr>`
-  ).join('');
+  let html = '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th></th><th>姓名</th><th>信箱</th><th>角色</th></tr></thead><tbody>';
+  html += directory.map(m => {
+    const av = m.avatar_url
+      ? `<img src="${m.avatar_url}" style="width:28px;height:28px;border-radius:50%;object-fit:cover">`
+      : `<div style="width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent2);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">${esc((m.name||'').slice(0,2))}</div>`;
+    return `<tr><td>${av}</td><td style="font-weight:600">${esc(m.name)}</td><td style="font-family:monospace;font-size:12.5px;color:var(--text3)">${esc(m.email)}</td><td><span class="chip-role">${esc(m.role)}</span></td></tr>`;
+  }).join('');
   html += '</tbody></table></div>';
   document.getElementById('content').innerHTML = html;
 }
@@ -1443,6 +1454,24 @@ async function deleteFeedback(id){
 // 設定頁（個人資料 / 密碼 / 同仁角色管理）
 // ══════════════════════════════════════
 const ROLE_OPTIONS = ['一般成員','Sales主管','CPM主管','FAAO主管','CEO','管理員'];
+function toggleVisibilityRoles(prefix, selectedRoles){
+  const sel = document.getElementById(prefix + 'Visibility').value;
+  const wrap = document.getElementById(prefix + 'VisibilityRoles');
+  const checksEl = document.getElementById(prefix + 'RoleChecks');
+  if(sel === 'private'){
+    wrap.style.display = 'block';
+    const pre = selectedRoles || [];
+    checksEl.innerHTML = ROLE_OPTIONS.map(r => `
+      <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer">
+        <input type="checkbox" value="${esc(r)}" class="${prefix}RoleCheckbox" ${pre.includes(r)?'checked':''}>${esc(r)}
+      </label>`).join('');
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+function getSelectedVisibleRoles(prefix){
+  return Array.from(document.querySelectorAll('.' + prefix + 'RoleCheckbox:checked')).map(el => el.value);
+}
 function roleOptionsHtml(current){
   return ROLE_OPTIONS.map(r => `<option value="${r}" ${r===current?'selected':''}>${r}</option>`).join('');
 }
@@ -1451,6 +1480,17 @@ function renderSettings(){
 
   html += '<div class="card">';
   html += '<div style="font-size:14px;font-weight:700;margin-bottom:14px">個人資料</div>';
+  html += `<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+    <div id="avatarPreview" style="width:64px;height:64px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--accent);color:#fff;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center">
+      ${me.avatarUrl ? `<img src="${me.avatarUrl}" style="width:100%;height:100%;object-fit:cover">` : esc(me.name.slice(0,2))}
+    </div>
+    <div>
+      <input type="file" id="avatarFileInput" accept="image/png,image/jpeg" style="display:none" onchange="handleAvatarFile(this)">
+      <button class="btn sm" type="button" onclick="document.getElementById('avatarFileInput').click()">更換頭像</button>
+      ${me.avatarUrl ? '<button class="btn sm danger" style="margin-left:6px" onclick="removeAvatar()">移除頭像</button>' : ''}
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">建議上傳正方形圖片，會自動裁切成圓形</div>
+    </div>
+  </div>`;
   html += `<div class="fr"><label class="flbl">姓名</label><input class="fi" id="setName" value="${esc(me.name)}"></div>`;
   html += `<div class="fr"><label class="flbl">部門角色（決定核決矩陣中的身份）</label><select class="fi" id="setRole">${roleOptionsHtml(me.role)}</select></div>`;
   html += `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">登入信箱：${esc(me.email)}（無法更改）</div>`;
@@ -1658,6 +1698,48 @@ async function deleteSignature(id){
   renderSettings();
   toast('已刪除');
 }
+function handleAvatarFile(input){
+  const f = input.files && input.files[0];
+  if(!f) return;
+  if(f.size > 5*1024*1024){ toast('圖片請控制在 5MB 以內'); input.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = async () => {
+      // 縮小成 160x160 的正方形圓形頭像，避免存太大的圖片
+      const size = 160;
+      const cv = document.createElement('canvas');
+      cv.width = size; cv.height = size;
+      const ctx = cv.getContext('2d');
+      const minSide = Math.min(img.width, img.height);
+      const sx = (img.width - minSide) / 2, sy = (img.height - minSide) / 2;
+      ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+      const dataUrl = cv.toDataURL('image/jpeg', 0.85);
+
+      const { error } = await sb.from('profiles').update({ avatar_url: dataUrl }).eq('id', me.id);
+      if(error){ toast('上傳失敗：' + error.message); return; }
+      me.avatarUrl = dataUrl;
+      updateSidebarAvatar();
+      renderSettings();
+      toast('✅ 頭像已更新');
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(f);
+}
+async function removeAvatar(){
+  const { error } = await sb.from('profiles').update({ avatar_url: null }).eq('id', me.id);
+  if(error){ toast('移除失敗：' + error.message); return; }
+  me.avatarUrl = null;
+  updateSidebarAvatar();
+  renderSettings();
+  toast('已移除頭像');
+}
+function updateSidebarAvatar(){
+  const av = document.getElementById('meAvatar');
+  if(!av) return;
+  av.innerHTML = me.avatarUrl ? `<img src="${me.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">` : esc(me.name.slice(0,2));
+}
 async function saveMyProfile(){
   const name = document.getElementById('setName').value.trim();
   const role = document.getElementById('setRole').value;
@@ -1665,7 +1747,7 @@ async function saveMyProfile(){
   const { error } = await sb.from('profiles').update({ name, role }).eq('id', me.id);
   if(error){ toast('儲存失敗：' + error.message); return; }
   me.name = name; me.role = role;
-  document.getElementById('meAvatar').textContent = name.slice(0,2);
+  updateSidebarAvatar();
   document.getElementById('meName').textContent = name;
   document.getElementById('meRole').textContent = role;
   await loadDirectory();
@@ -1708,6 +1790,7 @@ function openLaunch(){
   document.getElementById('lNote').value = '';
   document.getElementById('lSeal').value = 'company';
   document.getElementById('lVisibility').value = 'all';
+  document.getElementById('lVisibilityRoles').style.display = 'none';
   const d = new Date(); d.setDate(d.getDate()+14);
   document.getElementById('lDeadline').value = d.toISOString().split('T')[0];
   chainStores.launch = [];
@@ -1886,6 +1969,7 @@ async function doSubmitLaunch(){
   const note = document.getElementById('lNote').value.trim();
   const seal = document.getElementById('lSeal').value;
   const isPrivate = document.getElementById('lVisibility').value === 'private';
+  const visibleRoles = isPrivate ? getSelectedVisibleRoles('l') : [];
   const arr = chainStores.launch;
 
   const signersPayload = arr.map(c => ({
@@ -1904,7 +1988,8 @@ async function doSubmitLaunch(){
     p_note: note,
     p_seal_type: seal,
     p_signers: signersPayload,
-    p_is_private: isPrivate
+    p_is_private: isPrivate,
+    p_visible_roles: visibleRoles
   });
   if(error){ toast('建立任務失敗：' + error.message); btn.disabled=false; btn.textContent='送出簽核任務'; return; }
 
@@ -1979,6 +2064,7 @@ function openEditTask(taskId){
   document.getElementById('eNote').value = t.note || '';
   document.getElementById('eSeal').value = t.sealType || 'company';
   document.getElementById('eVisibility').value = t.isPrivate ? 'private' : 'all';
+  toggleVisibilityRoles('e', t.visibleRoles || []);
 
   chainStores.edit = t.signers.map(s => {
     const match = directory.find(d => d.email === s.email);
@@ -1998,6 +2084,7 @@ async function submitEditTask(){
   const note = document.getElementById('eNote').value.trim();
   const seal = document.getElementById('eSeal').value;
   const isPrivate = document.getElementById('eVisibility').value === 'private';
+  const visibleRoles = isPrivate ? getSelectedVisibleRoles('e') : [];
   const arr = chainStores.edit;
 
   if(!name){ toast('請填寫文件名稱'); return; }
@@ -2011,7 +2098,7 @@ async function submitEditTask(){
 
   const { error } = await sb.rpc('update_task_chain', {
     p_task_id: editingTaskId, p_name: name, p_deadline: deadline || null,
-    p_note: note, p_seal_type: seal, p_signers: signersPayload, p_is_private: isPrivate
+    p_note: note, p_seal_type: seal, p_signers: signersPayload, p_is_private: isPrivate, p_visible_roles: visibleRoles
   });
   if(error){ toast('儲存失敗：' + error.message); return; }
 
