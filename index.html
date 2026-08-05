@@ -487,6 +487,21 @@ tr.row-click:hover td{background:var(--surface2)}
   </div>
 </div>
 
+<!-- ══════════ 進度摘要 Modal（登入/重新整理時自動跳出）══════════ -->
+<div class="ov" id="digestOv">
+  <div class="modal">
+    <div class="m-head">
+      <h3>📋 簽核進度更新</h3>
+      <button class="m-close" onclick="closeDigest()">×</button>
+    </div>
+    <div class="m-body" id="digestBody" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="m-foot">
+      <span></span>
+      <button class="btn primary" onclick="closeDigest()">我知道了</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════ 核決矩陣編輯 Modal ══════════ -->
 <div class="ov" id="matrixEditOv">
   <div class="modal">
@@ -822,6 +837,7 @@ async function afterLogin(){
   goPage('dash');
   subscribeRealtime();
   toast('☁️ 已登入，' + me.name + ' 您好');
+  setTimeout(maybeShowDigest, 500);
 }
 async function restoreSession(){
   const { data:{ session } } = await sb.auth.getSession();
@@ -953,6 +969,57 @@ async function markAllNotificationsRead(){
   renderNotifPanel();
 }
 
+// 每次登入 / 重新整理時，如果有還沒看過的「已完成/被退回」通知，自動跳出摘要視窗
+let digestNotifIds = [];
+function maybeShowDigest(){
+  const relevant = notifications.filter(n => !n.is_read && (/已完成所有簽核/.test(n.message) || /已被退回/.test(n.message)));
+  if(!relevant.length) return;
+  digestNotifIds = relevant.map(n => n.id);
+
+  const doneOnes = relevant.filter(n => /已完成所有簽核/.test(n.message));
+  const rejectedOnes = relevant.filter(n => /已被退回/.test(n.message));
+
+  let html = '';
+  if(doneOnes.length){
+    html += `<div style="font-size:12px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">✅ 可以進行用印（${doneOnes.length}）</div>`;
+    html += doneOnes.map(n => `<div onclick="handleDigestClick(${n.id}, ${n.task_id||'null'})" style="padding:10px 8px;border-radius:8px;cursor:pointer;margin-bottom:4px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'">
+      <div style="font-size:13.5px">${esc(n.message)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">${fmtDate(n.created_at)}</div>
+    </div>`).join('');
+  }
+  if(rejectedOnes.length){
+    html += `<div style="font-size:12px;font-weight:700;color:var(--danger);text-transform:uppercase;letter-spacing:.06em;margin:${doneOnes.length?'16px':'0'} 0 8px">🚫 被退回（${rejectedOnes.length}）</div>`;
+    html += rejectedOnes.map(n => `<div onclick="handleDigestClick(${n.id}, ${n.task_id||'null'})" style="padding:10px 8px;border-radius:8px;cursor:pointer;margin-bottom:4px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'">
+      <div style="font-size:13.5px">${esc(n.message)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">${fmtDate(n.created_at)}</div>
+    </div>`).join('');
+  }
+  document.getElementById('digestBody').innerHTML = html;
+  openModalEl('digestOv');
+}
+async function handleDigestClick(notifId, taskId){
+  closeDigest();
+  const n = notifications.find(x=>x.id===notifId);
+  if(n && !n.is_read){
+    await sb.from('notifications').update({ is_read: true }).eq('id', notifId);
+    n.is_read = true;
+    updateNotifBadge();
+  }
+  if(taskId){
+    if(!tasks.find(t=>t.id===taskId)) await loadTasks();
+    openDrawer(taskId);
+  }
+}
+async function closeDigest(){
+  closeModal('digestOv');
+  if(digestNotifIds.length){
+    await sb.from('notifications').update({ is_read: true }).in('id', digestNotifIds);
+    notifications.forEach(n => { if(digestNotifIds.includes(n.id)) n.is_read = true; });
+    digestNotifIds = [];
+    updateNotifBadge();
+  }
+}
+
 // ══════════════════════════════════════
 // 頁面切換
 // ══════════════════════════════════════
@@ -1060,6 +1127,7 @@ function renderDash(){
   const doneCnt = tasks.filter(t => t.status==='done').length;
   const overdue = tasks.filter(t => t.deadline && t.status!=='done' && new Date(t.deadline) < new Date()).length;
   const notifyMe = tasks.filter(t => t.signers.some(s => s.notify && s.email===me.email));
+  const rejectedMine = tasks.filter(t => t.status==='rejected' && (isAdmin() || t.createdById===me.id));
 
   const stats = [
     { n: myTurn.length, l: '待我簽署', c: 'var(--danger)', mode: 'myTurn' },
@@ -1067,6 +1135,7 @@ function renderDash(){
     { n: overdue, l: '已逾期', c: 'var(--warn)', mode: 'overdue' },
     { n: doneCnt, l: '累計完成', c: 'var(--ok)', mode: 'done' },
     { n: notifyMe.length, l: '知會文件（我被通知的）', c: 'var(--info, #6054C8)', mode: 'notifyMe' },
+    { n: rejectedMine.length, l: '被退回文件', c: 'var(--danger)', mode: 'rejected' },
   ];
   html += '<div class="stat-grid">' + stats.map(s =>
     `<div class="stat" onclick="setTaskFilter('${s.mode}')"><div class="n" style="color:${s.c}">${s.n}</div><div class="l">${s.l}</div></div>`
@@ -1149,7 +1218,7 @@ function bottleneckInfo(t){
 // ══════════════════════════════════════
 const FILTER_LABEL = {
   all: '全部任務', myTurn: '待我簽署', inProgress: '進行中任務',
-  overdue: '已逾期', done: '累計完成', notifyMe: '知會文件（我被通知的）'
+  overdue: '已逾期', done: '累計完成', notifyMe: '知會文件（我被通知的）', rejected: '被退回文件'
 };
 function applyTaskFilter(list){
   const now = new Date();
@@ -1159,6 +1228,7 @@ function applyTaskFilter(list){
     case 'overdue': return list.filter(t => t.deadline && t.status!=='done' && new Date(t.deadline) < now);
     case 'done': return list.filter(t => t.status==='done');
     case 'notifyMe': return list.filter(t => t.signers.some(s => s.notify && s.email===me.email));
+    case 'rejected': return list.filter(t => t.status==='rejected' && (isAdmin() || t.createdById===me.id));
     default: return list;
   }
 }
