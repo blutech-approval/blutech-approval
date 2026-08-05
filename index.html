@@ -101,6 +101,7 @@ tr.row-click:hover td{background:var(--surface2)}
 .b-signing{background:var(--accent-soft);color:var(--accent2)}
 .b-done{background:var(--ok-soft);color:var(--ok)}
 .b-expired{background:var(--danger-soft);color:var(--danger)}
+.b-rejected{background:var(--danger-soft);color:var(--danger)}
 .chip-role{font-size:10.5px;padding:2px 8px;border-radius:var(--rpill);background:var(--surface3);color:var(--text2);white-space:nowrap}
 .chip-role.approve{background:var(--danger-soft);color:#9a3f3f}
 .chip-role.countersign{background:var(--accent-soft);color:var(--accent2)}
@@ -145,6 +146,7 @@ tr.row-click:hover td{background:var(--surface2)}
 .signer-av{width:28px;height:28px;border-radius:50%;background:var(--surface3);color:var(--text2);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .signer-av.done{background:var(--ok);color:#fff}
 .signer-av.signing{background:var(--accent);color:#fff}
+.signer-av.rejected{background:var(--danger);color:#fff}
 
 /* ── sign pad ── */
 #signCanvas{border:1.5px solid var(--border);border-radius:10px;width:100%;height:160px;touch-action:none;background:var(--surface2);cursor:crosshair}
@@ -304,9 +306,15 @@ tr.row-click:hover td{background:var(--surface2)}
         </button>
         <div><h1 id="pgTitle">工作總覽</h1><p id="pgSub">Blutech Inc. 智能行政核決系統</p></div>
       </div>
-      <button class="btn primary" onclick="openLaunch()">
-        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4"/></svg>發起簽核
-      </button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button onclick="openNotifications()" style="position:relative;background:none;border:none;cursor:pointer;color:var(--text2);padding:8px" title="通知">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+          <span id="notifBadge" style="position:absolute;top:4px;right:4px;background:var(--danger);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:50%;align-items:center;justify-content:center;padding:0 3px"></span>
+        </button>
+        <button class="btn primary" onclick="openLaunch()">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4"/></svg>發起簽核
+        </button>
+      </div>
     </div>
     <div class="content" id="content"></div>
   </main>
@@ -448,6 +456,37 @@ tr.row-click:hover td{background:var(--surface2)}
   </div>
 </div>
 
+<!-- ══════════ 拒絕簽署 Modal ══════════ -->
+<div class="ov" id="rejectOv">
+  <div class="modal">
+    <div class="m-head"><h3>拒絕簽署</h3><button class="m-close" onclick="closeModal('rejectOv')">×</button></div>
+    <div class="m-body">
+      <p id="rejectSub" style="font-size:12.5px;color:var(--text3);margin-bottom:14px"></p>
+      <div class="fr">
+        <label class="flbl">拒絕原因 <span style="color:var(--danger)">*</span></label>
+        <textarea class="fi" id="rejectReasonInput" rows="4" placeholder="請說明拒絕的原因，會通知起案人"></textarea>
+      </div>
+      <p style="font-size:11.5px;color:var(--text3)">拒絕後，此任務會停止流程並通知起案人；起案人可以修改後重新送出。</p>
+    </div>
+    <div class="m-foot">
+      <button class="btn" onclick="closeModal('rejectOv')">取消</button>
+      <button class="btn danger" onclick="confirmReject()">確認拒絕簽署</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 通知 Modal ══════════ -->
+<div class="ov" id="notificationsOv">
+  <div class="modal">
+    <div class="m-head"><h3>通知</h3><button class="m-close" onclick="closeModal('notificationsOv')">×</button></div>
+    <div class="m-body" id="notifBody" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="m-foot">
+      <button class="btn sm" onclick="markAllNotificationsRead()">全部標為已讀</button>
+      <span></span>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════ 核決矩陣編輯 Modal ══════════ -->
 <div class="ov" id="matrixEditOv">
   <div class="modal">
@@ -571,7 +610,7 @@ let editingMatrixCode = null; // 目前正在編輯的文件代碼（null 代表
 const MATRIX_ROLE_OPTIONS = ['Sales主管','CPM主管','FAAO主管','CEO'];
 
 const ACTION_LABEL = { approve:'核決', countersign:'會簽', notify:'知會' };
-const STATUS_LABEL = { draft:'草稿', signing:'簽署中', done:'已完成', expired:'已失效' };
+const STATUS_LABEL = { draft:'草稿', signing:'簽署中', done:'已完成', expired:'已失效', rejected:'已退回' };
 const SIGNER_STATUS_LABEL = { pending:'等待中', signing:'待簽署', done:'已完成', rejected:'已退回' };
 
 // ══════════════════════════════════════
@@ -776,6 +815,7 @@ async function afterLogin(){
   await loadTasks();
   await loadMatrixData();
   await loadMySignatures();
+  await loadNotifications();
   populateTypeSelect();
   appNavDepth = 0;
   window.history.replaceState({ page: 'dash', depth: 0 }, '', '#dash');
@@ -821,7 +861,7 @@ async function loadTasks(){
     signers: (signerRows||[]).filter(s => s.task_id === t.id).map(s => ({
       id: s.id, name: s.name, email: s.email, role: s.role, action: s.action,
       orderIndex: s.order_index, status: s.status, notify: s.notify,
-      signatureType: s.signature_type, signatureData: s.signature_data, signedAt: s.signed_at
+      signatureType: s.signature_type, signatureData: s.signature_data, signedAt: s.signed_at, reject_reason: s.reject_reason
     })),
     files: (fileRows||[]).filter(f => f.task_id === t.id).map(f => ({
       id: f.id, name: f.file_name, path: f.file_path, contentType: f.content_type,
@@ -843,7 +883,74 @@ function subscribeRealtime(){
     .on('postgres_changes', { event:'*', schema:'public', table:'task_signers' }, async ()=>{ await loadTasks(); if(currentPage==='dash') renderDash(); if(currentPage==='tasks') renderTasks(); if(drawerTaskId) openDrawer(drawerTaskId); })
     .on('postgres_changes', { event:'*', schema:'public', table:'matrix_types' }, async ()=>{ await loadMatrixData(); populateTypeSelect(); if(currentPage==='matrix') renderMatrixPage(); })
     .on('postgres_changes', { event:'*', schema:'public', table:'task_files' }, async ()=>{ await loadTasks(); if(currentPage==='tasks') renderTasks(); if(drawerTaskId) openDrawer(drawerTaskId); })
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'notifications' }, async (payload)=>{
+      await loadNotifications();
+      if(payload.new && payload.new.message) toast('🔔 ' + payload.new.message);
+    })
     .subscribe();
+}
+
+// ══════════════════════════════════════
+// 通知
+// ══════════════════════════════════════
+let notifications = [];
+async function loadNotifications(){
+  const { data, error } = await sb.from('notifications').select('*').order('created_at', { ascending:false }).limit(50);
+  if(error){ console.error(error); return; }
+  notifications = data || [];
+  updateNotifBadge();
+}
+function updateNotifBadge(){
+  const unread = notifications.filter(n => !n.is_read).length;
+  const badge = document.getElementById('notifBadge');
+  if(!badge) return;
+  if(unread > 0){
+    badge.textContent = unread > 99 ? '99+' : unread;
+    badge.style.display = 'flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+function openNotifications(){
+  renderNotifPanel();
+  openModalEl('notificationsOv');
+}
+function renderNotifPanel(){
+  const el = document.getElementById('notifBody');
+  if(!notifications.length){
+    el.innerHTML = '<div class="empty" style="padding:30px 0"><h4>目前沒有任何通知</h4></div>';
+    return;
+  }
+  el.innerHTML = notifications.map(n => `
+    <div onclick="handleNotifClick(${n.id}, ${n.task_id||'null'})" style="display:flex;gap:10px;padding:11px 4px;border-bottom:1px solid var(--surface3);cursor:pointer;${n.is_read?'':'background:var(--accent-soft)'}">
+      <div style="width:8px;height:8px;border-radius:50%;background:${n.is_read?'transparent':'var(--accent)'};margin-top:5px;flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:var(--text)">${esc(n.message)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${fmtDate(n.created_at)}</div>
+      </div>
+    </div>`).join('');
+}
+async function handleNotifClick(notifId, taskId){
+  const n = notifications.find(x=>x.id===notifId);
+  if(n && !n.is_read){
+    await sb.from('notifications').update({ is_read: true }).eq('id', notifId);
+    n.is_read = true;
+    updateNotifBadge();
+    renderNotifPanel();
+  }
+  if(taskId){
+    closeModal('notificationsOv');
+    if(!tasks.find(t=>t.id===taskId)) await loadTasks();
+    openDrawer(taskId);
+  }
+}
+async function markAllNotificationsRead(){
+  const unreadIds = notifications.filter(n=>!n.is_read).map(n=>n.id);
+  if(!unreadIds.length) return;
+  await sb.from('notifications').update({ is_read: true }).in('id', unreadIds);
+  notifications.forEach(n => n.is_read = true);
+  updateNotifBadge();
+  renderNotifPanel();
 }
 
 // ══════════════════════════════════════
@@ -1011,10 +1118,12 @@ function stepTrackHtml(t){
   if(!t.signers.length) return '<span style="font-size:12px;color:var(--text4)">尚未設定簽核人</span>';
   return '<div style="display:flex;align-items:center;gap:3px">' +
     t.signers.map((s,i) => {
-      const bg = s.status==='done' ? 'var(--ok)' : s.status==='signing' ? 'var(--accent)' : 'var(--surface3)';
+      const bg = s.status==='done' ? 'var(--ok)' : s.status==='signing' ? 'var(--accent)' : s.status==='rejected' ? 'var(--danger)' : 'var(--surface3)';
       const fg = s.status==='pending' ? 'var(--text3)' : '#fff';
       const pulse = s.status==='signing' ? 'box-shadow:0 0 0 3px var(--accent-soft)' : '';
-      const dot = `<div title="${esc(s.name)}（${esc(s.role||'')}・${ACTION_LABEL[s.action]||''}）" style="width:20px;height:20px;border-radius:50%;background:${bg};color:${fg};font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;${pulse}">${s.status==='done'?'✓':(i+1)}</div>`;
+      const icon = s.status==='done' ? '✓' : s.status==='rejected' ? '×' : (i+1);
+      const title = s.status==='rejected' ? `${esc(s.name)} 已拒絕：${esc(s.reject_reason||'')}` : `${esc(s.name)}（${esc(s.role||'')}・${ACTION_LABEL[s.action]||''}）`;
+      const dot = `<div title="${title}" style="width:20px;height:20px;border-radius:50%;background:${bg};color:${fg};font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;${pulse}">${icon}</div>`;
       const line = i < t.signers.length-1 ? `<div style="width:14px;height:2px;background:${s.status==='done'?'var(--ok)':'var(--border)'};flex-shrink:0"></div>` : '';
       return dot + line;
     }).join('') + '</div>';
@@ -1022,6 +1131,10 @@ function stepTrackHtml(t){
 function bottleneckInfo(t){
   if(t.status === 'done') return { text: '✅ 已全部完成', color: 'var(--ok)' };
   if(t.status === 'expired') return { text: '⚠️ 已逾期失效', color: 'var(--danger)' };
+  if(t.status === 'rejected'){
+    const r = t.signers.find(s => s.status === 'rejected');
+    return { text: `🚫 已被 ${r?r.name:'簽核人'} 拒絕${r&&r.reject_reason?'：'+r.reject_reason:''}`, color: 'var(--danger)' };
+  }
   const cur = t.signers.find(s => s.status === 'signing');
   if(!cur) return { text: '—', color: 'var(--text3)' };
   const idx = t.signers.findIndex(s => s.id === cur.id);
@@ -1679,7 +1792,7 @@ async function doSubmitLaunch(){
 let editingTaskId = null;
 function canEditTask(t){
   if(!t) return false;
-  if(t.status !== 'signing') return false;
+  if(t.status !== 'signing' && t.status !== 'rejected') return false;
   return isAdmin() || t.createdById === me.id;
 }
 function canDeleteTask(t){
@@ -1786,13 +1899,14 @@ function openDrawer(taskId){
 
   left += '<div class="d-sec"><div class="d-sec-title">簽核流程</div>';
   left += t.signers.map(s => {
-    const avClass = s.status==='done' ? 'done' : s.status==='signing' ? 'signing' : '';
+    const avClass = s.status==='done' ? 'done' : s.status==='signing' ? 'signing' : s.status==='rejected' ? 'rejected' : '';
     const canSign = (s.status==='signing') && s.email===me.email;
     return `<div class="signer-row">
       <div class="signer-av ${avClass}">${s.name.slice(0,1)}</div>
       <div style="flex:1"><div style="font-weight:500">${esc(s.name)} <span class="chip-role ${s.action}">${ACTION_LABEL[s.action]||''}</span></div>
-      <div style="font-size:11px;color:var(--text3)">${SIGNER_STATUS_LABEL[s.status]}${s.signedAt?(' · '+fmtDate(s.signedAt)):''}</div></div>
-      ${canSign?`<button class="btn primary sm" onclick="openSignModal(${t.id},${s.id})">簽署</button>`:''}
+      <div style="font-size:11px;color:var(--text3)">${SIGNER_STATUS_LABEL[s.status]}${s.signedAt?(' · '+fmtDate(s.signedAt)):''}</div>
+      ${s.status==='rejected' && s.reject_reason?`<div style="font-size:11.5px;color:var(--danger);margin-top:3px">拒絕原因：${esc(s.reject_reason)}</div>`:''}</div>
+      ${canSign?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn primary sm" onclick="openSignModal(${t.id},${s.id})">簽署</button><button class="btn sm danger" onclick="openRejectModal(${t.id},${s.id})">拒絕</button></div>`:''}
     </div>`;
   }).join('');
   left += '</div>';
@@ -1926,6 +2040,37 @@ async function finalizeSign(taskId, signerId, sigType, sigData){
   if(currentPage==='dash') renderDash();
   if(drawerTaskId) openDrawer(drawerTaskId);
   toast('✅ 簽署完成');
+}
+
+// ══════════════════════════════════════
+// 拒絕簽署
+// ══════════════════════════════════════
+let rejectContext = null;
+function openRejectModal(taskId, signerId){
+  const t = tasks.find(x=>x.id===taskId);
+  const s = t && t.signers.find(x=>x.id===signerId);
+  if(!s || s.email !== me.email){ toast('您沒有權限操作此關卡'); return; }
+  rejectContext = { taskId, signerId };
+  document.getElementById('rejectSub').textContent = t.name + '　·　身份：' + s.role + '（' + ACTION_LABEL[s.action] + '）';
+  document.getElementById('rejectReasonInput').value = '';
+  openModalEl('rejectOv');
+}
+async function confirmReject(){
+  if(!rejectContext) return;
+  const reason = document.getElementById('rejectReasonInput').value.trim();
+  if(!reason){ toast('請填寫拒絕原因'); return; }
+
+  const { error } = await sb.rpc('reject_task_signer', {
+    p_signer_id: rejectContext.signerId, p_reason: reason
+  });
+  if(error){ toast('操作失敗：' + error.message); return; }
+
+  closeModal('rejectOv');
+  await loadTasks();
+  if(currentPage==='tasks') renderTasks();
+  if(currentPage==='dash') renderDash();
+  if(drawerTaskId) openDrawer(drawerTaskId);
+  toast('已拒絕簽署，起案人將收到通知');
 }
 
 // ══════════════════════════════════════
