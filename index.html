@@ -681,6 +681,15 @@ async function doLogin(){
       if(!name){ showLoginErr('請輸入姓名'); return; }
       const { error } = await sb.auth.signUp({ email, password: pwd, options:{ data:{ name, role } } });
       if(error) throw error;
+
+      // 建立帳號後一律不自動登入，請使用者自己回登入頁輸入帳密
+      await sb.auth.signOut();
+      setLoginMode('login');
+      document.getElementById('loginPrefix').value = prefix;
+      const ok = document.getElementById('loginOk');
+      ok.textContent = '✅ 已成功建立帳號，請至登入頁面進行登入（若信箱驗證功能為開啟狀態，需先至信箱點擊驗證連結）。';
+      ok.style.display = 'block';
+      return;
     } else {
       const { error } = await sb.auth.signInWithPassword({ email, password: pwd });
       if(error) throw error;
@@ -869,7 +878,7 @@ function goPage(p, fromHistory, depth){
   } else if(typeof depth === 'number'){
     appNavDepth = depth;
   }
-  document.getElementById('backBtn').style.display = appNavDepth > 0 ? 'inline-flex' : 'none';
+  document.getElementById('backBtn').style.display = (appNavDepth > 0 && p !== 'dash') ? 'inline-flex' : 'none';
 }
 function goBack(){
   window.history.back();
@@ -889,13 +898,13 @@ let taskSearchQuery = '';
 function onTaskSearchInput(el){
   taskSearchQuery = el.value;
   const cursorPos = el.selectionStart;
-  renderTasks();
-  const newEl = document.getElementById('taskSearchInput');
+  renderDash();
+  const newEl = document.getElementById('dashSearchInput');
   if(newEl){ newEl.focus(); newEl.setSelectionRange(cursorPos, cursorPos); }
 }
 function clearTaskSearch(){
   taskSearchQuery = '';
-  renderTasks();
+  renderDash();
 }
 function applyTaskSearch(list){
   const q = taskSearchQuery.trim().toLowerCase();
@@ -912,6 +921,33 @@ function setTaskFilter(mode){
   goPage('tasks');
 }
 function renderDash(){
+  let html = `<div style="position:relative;max-width:420px;margin-bottom:18px">
+    <input class="fi" id="dashSearchInput" placeholder="🔍 搜尋文件名稱、類型、發起人或簽核人..." value="${esc(taskSearchQuery)}" oninput="onTaskSearchInput(this)" style="padding-right:${taskSearchQuery?'34px':'13px'}">
+    ${taskSearchQuery ? `<button onclick="clearTaskSearch()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer">×</button>` : ''}
+  </div>`;
+
+  if(taskSearchQuery.trim()){
+    const results = applyTaskSearch(tasks);
+    html += `<div style="font-size:13px;color:var(--text3);margin-bottom:10px">找到 ${results.length} 筆符合「${esc(taskSearchQuery)}」的任務</div>`;
+    if(!results.length){
+      html += '<div class="empty"><h4>找不到符合搜尋的任務</h4></div>';
+    } else {
+      html += '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>文件名稱</th><th>狀態</th><th>簽核進度</th></tr></thead><tbody>';
+      html += results.map(t => {
+        const bClass = 'b-' + (t.status==='signing'?'signing':t.status);
+        const bn = bottleneckInfo(t);
+        return `<tr class="row-click" onclick="openDrawer(${t.id})">
+          <td><div style="font-weight:600;font-size:13px">${esc(t.name)}</div><div style="font-size:11px;color:var(--text3)">${esc(t.type)} · 發起人：${esc(t.createdBy||'—')}</div></td>
+          <td><span class="badge ${bClass}">${STATUS_LABEL[t.status]||t.status}</span></td>
+          <td>${stepTrackHtml(t)}<div style="margin-top:5px;font-size:11.5px;color:${bn.color}">${bn.text}</div></td>
+        </tr>`;
+      }).join('');
+      html += '</tbody></table></div>';
+    }
+    document.getElementById('content').innerHTML = html;
+    return;
+  }
+
   const myTurn = tasks.filter(t => t.signers.some(s => s.status==='signing' && s.email===me.email));
   const inProgress = tasks.filter(t => t.status==='signing');
   const doneCnt = tasks.filter(t => t.status==='done').length;
@@ -925,7 +961,7 @@ function renderDash(){
     { n: doneCnt, l: '累計完成', c: 'var(--ok)', mode: 'done' },
     { n: notifyMe.length, l: '知會文件（我被通知的）', c: 'var(--info, #6054C8)', mode: 'notifyMe' },
   ];
-  let html = '<div class="stat-grid">' + stats.map(s =>
+  html += '<div class="stat-grid">' + stats.map(s =>
     `<div class="stat" onclick="setTaskFilter('${s.mode}')"><div class="n" style="color:${s.c}">${s.n}</div><div class="l">${s.l}</div></div>`
   ).join('') + '</div>';
 
@@ -1014,21 +1050,17 @@ function applyTaskFilter(list){
   }
 }
 function renderTasks(){
-  let html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">';
-  html += `<div style="position:relative;flex:1;max-width:360px">
-    <input class="fi" id="taskSearchInput" placeholder="搜尋文件名稱、類型、發起人或簽核人..." value="${esc(taskSearchQuery)}" oninput="onTaskSearchInput(this)" style="padding-right:${taskSearchQuery?'34px':'13px'}">
-    ${taskSearchQuery ? `<button onclick="clearTaskSearch()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer">×</button>` : ''}
-  </div></div>`;
+  let html = '';
   if(taskListFilter !== 'all'){
     html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:9px 14px;background:var(--accent-soft);border-radius:var(--r);font-size:12.5px;color:var(--accent2)">
       篩選中：<b>${FILTER_LABEL[taskListFilter]||taskListFilter}</b>
       <button class="btn sm" style="margin-left:auto" onclick="setTaskFilter('all')">清除篩選</button>
     </div>`;
   }
-  const list = applyTaskSearch(applyTaskFilter(tasks));
+  const list = applyTaskFilter(tasks);
   if(!list.length){
-    const emptyReason = taskSearchQuery ? '找不到符合搜尋的任務' : (taskListFilter==='all' ? '目前沒有任何簽核任務' : '這個篩選條件下沒有任務');
-    html += '<div class="empty"><h4>' + emptyReason + '</h4><p>' + (taskListFilter==='all' && !taskSearchQuery ? '點右上角「發起簽核」建立第一筆任務' : '') + '</p></div>';
+    const emptyReason = taskListFilter==='all' ? '目前沒有任何簽核任務' : '這個篩選條件下沒有任務';
+    html += '<div class="empty"><h4>' + emptyReason + '</h4><p>' + (taskListFilter==='all' ? '點右上角「發起簽核」建立第一筆任務' : '') + '</p></div>';
   } else {
     html += '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>文件名稱</th><th>狀態</th><th>簽核進度</th><th>截止日</th><th></th></tr></thead><tbody>';
     html += list.map(t => {
