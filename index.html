@@ -286,6 +286,9 @@ tr.row-click:hover td{background:var(--surface2)}
       <div class="nav-item" data-page="settings" onclick="goPage('settings')">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>設定
       </div>
+      <div class="nav-item" data-page="feedback" onclick="goPage('feedback')">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 00-4 0v1M14 7V4a2 2 0 00-4 0v4M10 8V6a2 2 0 00-4 0v10c0-1-1-3-3-3.5A1.7 1.7 0 001 14.5C1 17 4 21 4 21h13c1 0 2-1 2.5-2l1.5-5a2 2 0 00-4-1v-1"/></svg>意見回饋
+      </div>
     </nav>
     <div class="user-card">
       <div class="user-row">
@@ -349,6 +352,13 @@ tr.row-click:hover td{background:var(--surface2)}
         </select>
       </div>
       <div class="fr">
+        <label class="flbl">可見範圍</label>
+        <select class="fi" id="lVisibility">
+          <option value="all">🌐 全部同仁可見</option>
+          <option value="private">🔒 只有相關人員可見（起案人／簽核人／管理員）</option>
+        </select>
+      </div>
+      <div class="fr">
         <label class="flbl">備註說明</label>
         <textarea class="fi" id="lNote" rows="2" placeholder="選填"></textarea>
       </div>
@@ -407,6 +417,13 @@ tr.row-click:hover td{background:var(--surface2)}
         </div>
       </div>
       <div class="fr"><label class="flbl">備註說明</label><textarea class="fi" id="eNote" rows="2"></textarea></div>
+      <div class="fr">
+        <label class="flbl">可見範圍</label>
+        <select class="fi" id="eVisibility">
+          <option value="all">🌐 全部同仁可見</option>
+          <option value="private">🔒 只有相關人員可見（起案人／簽核人／管理員）</option>
+        </select>
+      </div>
       <div class="fr">
         <label class="flbl">簽核流程（已完成的關卡鎖定無法修改，其餘可自由調整）</label>
         <div id="editChainList"></div>
@@ -608,6 +625,7 @@ let stampState = null;      // PDF 蓋章 Modal 目前的狀態
 let mySigTab = 'draw';      // 設定頁「我的簽名」目前選到的分頁
 let mySigFileData = null;   // 插入檔案模式下，使用者選擇的圖檔 dataURL
 let mySignatures = [];      // 使用者的簽名庫（多組）
+let feedbackList = [];      // 意見回饋列表
 let signingContext = null;  // { taskId, signerId }
 let drawing = false;
 
@@ -873,7 +891,7 @@ async function loadTasks(){
   tasks = (taskRows||[]).map(t => ({
     id: t.id, name: t.name, type: t.type, typeCode: t.type_code,
     deadline: t.deadline, note: t.note, sealType: t.seal_type, status: t.status,
-    createdBy: t.created_by_name, createdById: t.created_by, createdAt: t.created_at,
+    createdBy: t.created_by_name, createdById: t.created_by, createdAt: t.created_at, isPrivate: t.is_private,
     signers: (signerRows||[]).filter(s => s.task_id === t.id).map(s => ({
       id: s.id, name: s.name, email: s.email, role: s.role, action: s.action,
       orderIndex: s.order_index, status: s.status, notify: s.notify,
@@ -1029,6 +1047,7 @@ const PAGE_META = {
   matrix:{ title:'核決矩陣', sub:'各類文件的簽核層級對照表' },
   members:{ title:'同仁名冊', sub:'公司登入帳號與角色列表' },
   settings:{ title:'設定', sub:'個人資料、密碼與角色管理' },
+  feedback:{ title:'意見回饋', sub:'給我們你的使用建議' },
 };
 let appNavDepth = 0;
 function goPage(p, fromHistory, depth){
@@ -1043,6 +1062,7 @@ function goPage(p, fromHistory, depth){
   if(p==='matrix') renderMatrixPage();
   if(p==='members') renderMembers();
   if(p==='settings') renderSettings();
+  if(p==='feedback') renderFeedback();
 
   if(!fromHistory){
     if(!(window.history.state && window.history.state.page === p)){
@@ -1111,7 +1131,7 @@ function renderDash(){
         const bClass = 'b-' + (t.status==='signing'?'signing':t.status);
         const bn = bottleneckInfo(t);
         return `<tr class="row-click" onclick="openDrawer(${t.id})">
-          <td><div style="font-weight:600;font-size:13px">${esc(t.name)}</div><div style="font-size:11px;color:var(--text3)">${esc(t.type)} · 發起人：${esc(t.createdBy||'—')}</div></td>
+          <td><div style="font-weight:600;font-size:13px">${t.isPrivate?'🔒 ':''}${esc(t.name)}</div><div style="font-size:11px;color:var(--text3)">${esc(t.type)} · 發起人：${esc(t.createdBy||'—')}</div></td>
           <td><span class="badge ${bClass}">${STATUS_LABEL[t.status]||t.status}</span></td>
           <td>${stepTrackHtml(t)}<div style="margin-top:5px;font-size:11.5px;color:${bn.color}">${bn.text}</div></td>
         </tr>`;
@@ -1164,7 +1184,7 @@ function renderDash(){
     html += inProgress.map(t => {
       const bn = bottleneckInfo(t);
       return `<tr class="row-click" onclick="openDrawer(${t.id})">
-        <td><div style="font-weight:600;font-size:13px">${esc(t.name)}</div><div style="font-size:11px;color:var(--text3)">${esc(t.type)} · 發起人：${esc(t.createdBy||'—')}</div></td>
+        <td><div style="font-weight:600;font-size:13px">${t.isPrivate?'🔒 ':''}${esc(t.name)}</div><div style="font-size:11px;color:var(--text3)">${esc(t.type)} · 發起人：${esc(t.createdBy||'—')}</div></td>
         <td>${stepTrackHtml(t)}<div style="margin-top:5px;font-size:11.5px;color:${bn.color}">${bn.text}</div></td>
       </tr>`;
     }).join('');
@@ -1250,7 +1270,7 @@ function renderTasks(){
       const bClass = 'b-' + (t.status==='signing'?'signing':t.status);
       const bn = bottleneckInfo(t);
       return `<tr class="row-click" onclick="openDrawer(${t.id})">
-        <td><div style="font-weight:600">${esc(t.name)}</div><div style="font-size:11.5px;color:var(--text3)">${esc(t.type)} · 發起人：${esc(t.createdBy||'—')}</div></td>
+        <td><div style="font-weight:600">${t.isPrivate?'🔒 ':''}${esc(t.name)}</div><div style="font-size:11.5px;color:var(--text3)">${esc(t.type)} · 發起人：${esc(t.createdBy||'—')}</div></td>
         <td><span class="badge ${bClass}">${STATUS_LABEL[t.status]||t.status}</span></td>
         <td>${stepTrackHtml(t)}<div style="margin-top:5px;font-size:11.5px;color:${bn.color}">${bn.text}</div></td>
         <td style="font-size:12.5px;color:var(--text3)">${t.deadline||'—'}</td>
@@ -1362,6 +1382,61 @@ function renderMembers(){
   ).join('');
   html += '</tbody></table></div>';
   document.getElementById('content').innerHTML = html;
+}
+
+// ══════════════════════════════════════
+// 意見回饋
+// ══════════════════════════════════════
+async function renderFeedback(){
+  let html = '<div style="max-width:640px;display:flex;flex-direction:column;gap:16px">';
+  html += '<div class="card">';
+  html += '<div style="font-size:14px;font-weight:700;margin-bottom:6px">✋ 給我們你的建議</div>';
+  html += '<p style="font-size:12px;color:var(--text3);margin-bottom:12px">系統哪裡不好用、想要什麼新功能，都可以寫在這裡，我們會定期查看。</p>';
+  html += '<textarea class="fi" id="feedbackInput" rows="4" placeholder="請輸入您的建議或問題..."></textarea>';
+  html += '<button class="btn primary sm" style="margin-top:10px" onclick="submitFeedback()">送出建議</button>';
+  html += '</div>';
+
+  html += `<div class="card"><div style="font-size:14px;font-weight:700;margin-bottom:12px">${isAdmin() ? '全公司意見回饋' : '我送出過的建議'}</div><div id="feedbackList">載入中...</div></div>`;
+  html += '</div>';
+  document.getElementById('content').innerHTML = html;
+
+  const { data, error } = await sb.from('feedback').select('*').order('created_at', { ascending:false });
+  const listEl = document.getElementById('feedbackList');
+  if(error){ listEl.innerHTML = '<p style="font-size:12.5px;color:var(--danger)">讀取失敗：' + esc(error.message) + '</p>'; return; }
+  feedbackList = data || [];
+  if(!feedbackList.length){
+    listEl.innerHTML = '<p style="font-size:12.5px;color:var(--text3)">目前還沒有任何意見回饋。</p>';
+    return;
+  }
+  listEl.innerHTML = feedbackList.map(f => `
+    <div style="padding:11px 0;border-bottom:1px solid var(--surface3)">
+      <div style="display:flex;align-items:flex-start;gap:8px">
+        <div style="flex:1;font-size:13.5px;${f.is_reviewed?'color:var(--text3)':''}">${esc(f.message)}</div>
+        ${isAdmin() ? `<button class="btn sm" onclick="toggleFeedbackReviewed(${f.id}, ${!f.is_reviewed})">${f.is_reviewed?'標記未處理':'標記已處理'}</button><button class="btn sm danger" onclick="deleteFeedback(${f.id})">刪除</button>` : (f.is_reviewed ? '<span class="chip-role countersign">已讀取</span>' : '')}
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">${isAdmin()?esc(f.user_name||'')+' · ':''}${fmtDate(f.created_at)}</div>
+    </div>`).join('');
+}
+async function submitFeedback(){
+  const el = document.getElementById('feedbackInput');
+  const msg = el.value.trim();
+  if(!msg){ toast('請輸入建議內容'); return; }
+  const { error } = await sb.from('feedback').insert({ user_id: me.id, user_name: me.name, message: msg });
+  if(error){ toast('送出失敗：' + error.message); return; }
+  el.value = '';
+  toast('✅ 已送出，謝謝你的建議！');
+  renderFeedback();
+}
+async function toggleFeedbackReviewed(id, val){
+  const { error } = await sb.from('feedback').update({ is_reviewed: val }).eq('id', id);
+  if(error){ toast('更新失敗：' + error.message); return; }
+  renderFeedback();
+}
+async function deleteFeedback(id){
+  if(!confirm('確定要刪除這則意見回饋嗎？')) return;
+  const { error } = await sb.from('feedback').delete().eq('id', id);
+  if(error){ toast('刪除失敗：' + error.message); return; }
+  renderFeedback();
 }
 
 // ══════════════════════════════════════
@@ -1632,6 +1707,7 @@ function openLaunch(){
   document.getElementById('lType').value = '';
   document.getElementById('lNote').value = '';
   document.getElementById('lSeal').value = 'company';
+  document.getElementById('lVisibility').value = 'all';
   const d = new Date(); d.setDate(d.getDate()+14);
   document.getElementById('lDeadline').value = d.toISOString().split('T')[0];
   chainStores.launch = [];
@@ -1782,9 +1858,12 @@ function submitLaunch(){
   if(invalid){ toast('請完整填寫每一位簽署人的姓名與 Email'); return; }
 
   const sealLabel = seal === 'personal' ? '便章' : '合約章';
+  const visibility = document.getElementById('lVisibility').value;
+  const visLabel = visibility === 'private' ? '🔒 只有相關人員可見' : '🌐 全部同仁可見';
   let html = `<div style="margin-bottom:10px"><b>文件名稱：</b>${esc(name)}</div>`;
   html += `<div style="margin-bottom:10px"><b>文件類型：</b>${esc(typeEntry ? typeEntry.name : typeCode)}</div>`;
   html += `<div style="margin-bottom:10px"><b>用印類型：</b>${sealLabel}</div>`;
+  html += `<div style="margin-bottom:10px"><b>可見範圍：</b>${visLabel}</div>`;
   html += `<div style="margin-bottom:10px"><b>截止日期：</b>${deadline||'未設定'}</div>`;
   html += `<div style="margin-bottom:10px"><b>附件：</b>${launchFilesDraft.length} 個檔案</div>`;
   html += '<div><b>簽核流程：</b><div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">';
@@ -1806,6 +1885,7 @@ async function doSubmitLaunch(){
   const deadline = document.getElementById('lDeadline').value;
   const note = document.getElementById('lNote').value.trim();
   const seal = document.getElementById('lSeal').value;
+  const isPrivate = document.getElementById('lVisibility').value === 'private';
   const arr = chainStores.launch;
 
   const signersPayload = arr.map(c => ({
@@ -1823,7 +1903,8 @@ async function doSubmitLaunch(){
     p_deadline: deadline || null,
     p_note: note,
     p_seal_type: seal,
-    p_signers: signersPayload
+    p_signers: signersPayload,
+    p_is_private: isPrivate
   });
   if(error){ toast('建立任務失敗：' + error.message); btn.disabled=false; btn.textContent='送出簽核任務'; return; }
 
@@ -1897,6 +1978,7 @@ function openEditTask(taskId){
   document.getElementById('eDeadline').value = t.deadline || '';
   document.getElementById('eNote').value = t.note || '';
   document.getElementById('eSeal').value = t.sealType || 'company';
+  document.getElementById('eVisibility').value = t.isPrivate ? 'private' : 'all';
 
   chainStores.edit = t.signers.map(s => {
     const match = directory.find(d => d.email === s.email);
@@ -1915,6 +1997,7 @@ async function submitEditTask(){
   const deadline = document.getElementById('eDeadline').value;
   const note = document.getElementById('eNote').value.trim();
   const seal = document.getElementById('eSeal').value;
+  const isPrivate = document.getElementById('eVisibility').value === 'private';
   const arr = chainStores.edit;
 
   if(!name){ toast('請填寫文件名稱'); return; }
@@ -1928,7 +2011,7 @@ async function submitEditTask(){
 
   const { error } = await sb.rpc('update_task_chain', {
     p_task_id: editingTaskId, p_name: name, p_deadline: deadline || null,
-    p_note: note, p_seal_type: seal, p_signers: signersPayload
+    p_note: note, p_seal_type: seal, p_signers: signersPayload, p_is_private: isPrivate
   });
   if(error){ toast('儲存失敗：' + error.message); return; }
 
@@ -1947,7 +2030,7 @@ function openDrawer(taskId){
   drawerTaskId = taskId;
   const t = tasks.find(x=>x.id===taskId);
   if(!t) return;
-  document.getElementById('drTitle').textContent = t.name;
+  document.getElementById('drTitle').textContent = (t.isPrivate ? '🔒 ' : '') + t.name;
   document.getElementById('drSub').textContent = t.type + ' · 建立於 ' + fmtDate(t.createdAt);
   document.getElementById('drEditBtn').style.display = canEditTask(t) ? 'inline-flex' : 'none';
   document.getElementById('drDeleteBtn').style.display = canDeleteTask(t) ? 'inline-flex' : 'none';
