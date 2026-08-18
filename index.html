@@ -457,6 +457,13 @@ tr.row-click:hover td{background:var(--surface2)}
         </div>
       </div>
       <div class="fr">
+        <label class="flbl">附件</label>
+        <div id="eExistingFiles" style="margin-bottom:8px"></div>
+        <input type="file" id="eFileInput" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style="display:none" onchange="handleEditFiles(this)">
+        <button class="btn sm" type="button" onclick="document.getElementById('eFileInput').click()">📎 新增附件</button>
+        <div id="eNewFileList" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+      <div class="fr">
         <label class="flbl">簽核流程（已完成的關卡鎖定無法修改，其餘可自由調整）</label>
         <div id="editChainList"></div>
         <div style="display:flex;gap:8px;margin-top:8px">
@@ -466,8 +473,8 @@ tr.row-click:hover td{background:var(--surface2)}
       </div>
     </div>
     <div class="m-foot">
-      <span></span>
-      <button class="btn primary" onclick="submitEditTask()">儲存變更</button>
+      <span id="editTaskFootMsg" style="font-size:12px;color:var(--text3)"></span>
+      <button class="btn primary" id="submitEditTaskBtn" onclick="submitEditTask()">儲存變更</button>
     </div>
   </div>
 </div>
@@ -671,7 +678,7 @@ let MATRIX_DATA = [
     chain:[ {role:'Sales主管',action:'countersign'}, {role:'CEO',action:'approve'} ] },
 ];
 let matrixChainDraft = [];   // 編輯文件類型時目前的簽核鏈草稿
-let editingMatrixCode = null; // 目前正在編輯的文件代碼（null 代表新增）
+let editingMatrixId = null; // 目前正在編輯的文件類型 id（null 代表新增）
 const MATRIX_ROLE_OPTIONS = ['Sales主管','CPM主管','FAAO主管','CEO'];
 
 const ACTION_LABEL = { approve:'核決', countersign:'會簽', notify:'知會' };
@@ -906,7 +913,7 @@ async function loadMatrixData(){
   const { data, error } = await sb.from('matrix_types').select('*').order('sort_order');
   if(error){ console.error(error); return; }
   if(data && data.length){
-    MATRIX_DATA = data.map(m => ({ code:m.code, name:m.name, note:m.note, seal:m.seal, chain: m.chain||[] }));
+    MATRIX_DATA = data.map(m => ({ id:m.id, code:m.code, name:m.name, note:m.note, seal:m.seal, chain: m.chain||[] }));
   }
 }
 function isAdmin(){
@@ -1379,21 +1386,21 @@ function renderMatrixPage(){
   html += '<div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>代碼</th><th>文件類型</th><th>簽核流程</th><th>用印</th><th>備註</th>' + (admin?'<th></th>':'') + '</tr></thead><tbody>';
   html += MATRIX_DATA.map(m => {
     const chainTxt = '起案 → ' + (m.chain||[]).map(c => `${c.role}（${ACTION_LABEL[c.action]||c.action}）`).join(' → ');
-    const actions = admin ? `<td style="white-space:nowrap"><button class="btn sm" onclick="openMatrixEdit('${m.code}')">編輯</button> <button class="btn sm danger" onclick="deleteMatrixType('${m.code}')">刪除</button></td>` : '';
+    const actions = admin ? `<td style="white-space:nowrap"><button class="btn sm" onclick="openMatrixEdit(${m.id})">編輯</button> <button class="btn sm danger" onclick="deleteMatrixType(${m.id})">刪除</button></td>` : '';
     return `<tr><td style="font-weight:700;color:var(--accent)">${esc(m.code)}</td><td>${esc(m.name)}</td><td style="font-size:12.5px">${chainTxt}</td><td>${esc(m.seal)}</td><td style="font-size:12px;color:var(--text3)">${esc(m.note||'')}</td>${actions}</tr>`;
   }).join('');
   html += '</tbody></table></div>';
   if(!admin){
     html += '<p style="font-size:12px;color:var(--text3);margin-top:10px">只有管理員或 CEO 角色可以編輯核決矩陣。</p>';
   }
+  html += '<p style="font-size:11.5px;color:var(--text3);margin-top:10px">提示：同一個代碼可以對應好幾種不同名稱的文件類型（例如 A 可能同時是「訂單合約書」跟「採購合約書」），只要名稱不完全一樣就可以並存。</p>';
   document.getElementById('content').innerHTML = html;
 }
-function openMatrixEdit(code){
-  editingMatrixCode = code;
-  const entry = code ? MATRIX_DATA.find(m => m.code === code) : null;
-  document.getElementById('matrixEditTitle').textContent = code ? '編輯文件類型' : '新增文件類型';
+function openMatrixEdit(id){
+  editingMatrixId = id;
+  const entry = id ? MATRIX_DATA.find(m => m.id === id) : null;
+  document.getElementById('matrixEditTitle').textContent = entry ? '編輯文件類型' : '新增文件類型';
   document.getElementById('mCode').value = entry ? entry.code : '';
-  document.getElementById('mCode').disabled = !!entry;
   document.getElementById('mName').value = entry ? entry.name : '';
   document.getElementById('mNote').value = entry ? (entry.note||'') : '';
   document.getElementById('mSeal').value = entry ? entry.seal : '合約章';
@@ -1436,10 +1443,16 @@ async function submitMatrixEdit(){
   if(!name){ toast('請輸入文件名稱'); return; }
   if(!matrixChainDraft.length){ toast('請至少設定一個簽核關卡'); return; }
 
-  const { error } = await sb.from('matrix_types').upsert({
-    code, name, note, seal, chain: matrixChainDraft
-  }, { onConflict: 'code' });
-  if(error){ toast('儲存失敗：' + error.message); return; }
+  let error;
+  if(editingMatrixId){
+    ({ error } = await sb.from('matrix_types').update({ code, name, note, seal, chain: matrixChainDraft }).eq('id', editingMatrixId));
+  } else {
+    ({ error } = await sb.from('matrix_types').insert({ code, name, note, seal, chain: matrixChainDraft }));
+  }
+  if(error){
+    if(error.code === '23505'){ toast('已經有相同「代碼＋名稱」的文件類型了，請改一下名稱'); return; }
+    toast('儲存失敗：' + error.message); return;
+  }
 
   closeModal('matrixEditOv');
   await loadMatrixData();
@@ -1447,9 +1460,9 @@ async function submitMatrixEdit(){
   renderMatrixPage();
   toast('✅ 已儲存「' + name + '」');
 }
-async function deleteMatrixType(code){
+async function deleteMatrixType(id){
   if(!confirm('確定要刪除這個文件類型嗎？已經送出的舊任務不受影響。')) return;
-  const { error } = await sb.from('matrix_types').delete().eq('code', code);
+  const { error } = await sb.from('matrix_types').delete().eq('id', id);
   if(error){ toast('刪除失敗：' + error.message); return; }
   await loadMatrixData();
   populateTypeSelect();
@@ -1859,7 +1872,7 @@ async function saveMemberRole(id){
 function populateTypeSelect(){
   const sel = document.getElementById('lType');
   sel.innerHTML = '<option value="">請選擇</option>' +
-    MATRIX_DATA.map(m => `<option value="${m.code}">${m.code}｜${esc(m.name)}</option>`).join('');
+    MATRIX_DATA.map(m => `<option value="${m.id}">${esc(m.code)}｜${esc(m.name)}</option>`).join('');
 }
 function openLaunch(){
   document.getElementById('lName').value = '';
@@ -1907,8 +1920,8 @@ function renderLaunchFileList(){
       <button class="chain-remove" onclick="removeLaunchFile(${i})">×</button>
     </div>`).join('');
 }
-function onTypeChange(code){
-  const entry = MATRIX_DATA.find(m => m.code === code);
+function onTypeChange(id){
+  const entry = MATRIX_DATA.find(m => String(m.id) === String(id));
   if(!entry) return;
   document.getElementById('lSeal').value = entry.seal === '合約章' ? 'company' : 'personal';
   chainStores.launch = entry.chain.map(step => {
@@ -2005,14 +2018,14 @@ function chainDragEnd(e){
 }
 function submitLaunch(){
   const name = document.getElementById('lName').value.trim();
-  const typeCode = document.getElementById('lType').value;
-  const typeEntry = MATRIX_DATA.find(m=>m.code===typeCode);
+  const typeId = document.getElementById('lType').value;
+  const typeEntry = MATRIX_DATA.find(m=>String(m.id)===String(typeId));
   const deadline = document.getElementById('lDeadline').value;
   const seal = document.getElementById('lSeal').value;
   const arr = chainStores.launch;
 
   if(!name){ toast('請填寫文件名稱'); return; }
-  if(!typeCode){ toast('請選擇文件類型'); return; }
+  if(!typeId){ toast('請選擇文件類型'); return; }
   if(!arr.length){ toast('請至少設定一位簽署人'); return; }
   const invalid = arr.find(c => !c.name || !c.email);
   if(invalid){ toast('請完整填寫每一位簽署人的姓名與 Email'); return; }
@@ -2021,7 +2034,7 @@ function submitLaunch(){
   const visibility = document.getElementById('lVisibility').value;
   const visLabel = visibility === 'private' ? '🔒 只有相關人員可見' : '🌐 全部同仁可見';
   let html = `<div style="margin-bottom:10px"><b>文件名稱：</b>${esc(name)}</div>`;
-  html += `<div style="margin-bottom:10px"><b>文件類型：</b>${esc(typeEntry ? typeEntry.name : typeCode)}</div>`;
+  html += `<div style="margin-bottom:10px"><b>文件類型：</b>${esc(typeEntry ? typeEntry.name : '')}</div>`;
   html += `<div style="margin-bottom:10px"><b>用印類型：</b>${sealLabel}</div>`;
   html += `<div style="margin-bottom:10px"><b>可見範圍：</b>${visLabel}</div>`;
   html += `<div style="margin-bottom:10px"><b>截止日期：</b>${deadline||'未設定'}</div>`;
@@ -2040,8 +2053,8 @@ function submitLaunch(){
 async function doSubmitLaunch(){
   closeModal('launchConfirmOv');
   const name = document.getElementById('lName').value.trim();
-  const typeCode = document.getElementById('lType').value;
-  const typeEntry = MATRIX_DATA.find(m=>m.code===typeCode);
+  const typeId = document.getElementById('lType').value;
+  const typeEntry = MATRIX_DATA.find(m=>String(m.id)===String(typeId));
   const deadline = document.getElementById('lDeadline').value;
   const note = document.getElementById('lNote').value.trim();
   const seal = document.getElementById('lSeal').value;
@@ -2059,8 +2072,8 @@ async function doSubmitLaunch(){
 
   const { data: newTaskId, error } = await sb.rpc('create_task_with_signers', {
     p_name: name,
-    p_type: typeEntry ? typeEntry.name : (typeCode || '一般文件'),
-    p_type_code: typeCode,
+    p_type: typeEntry ? typeEntry.name : '一般文件',
+    p_type_code: typeEntry ? typeEntry.code : null,
     p_deadline: deadline || null,
     p_note: note,
     p_seal_type: seal,
@@ -2103,6 +2116,8 @@ async function doSubmitLaunch(){
 // 編輯任務
 // ══════════════════════════════════════
 let editingTaskId = null;
+let editFilesToRemove = new Set();
+let editFilesToAdd = [];
 function canEditTask(t){
   if(!t) return false;
   if(t.status !== 'signing' && t.status !== 'rejected') return false;
@@ -2151,8 +2166,60 @@ function openEditTask(taskId){
     };
   });
   renderChainStore('edit');
+
+  editFilesToRemove = new Set();
+  editFilesToAdd = [];
+  document.getElementById('eFileInput').value = '';
+  renderEditExistingFiles();
+  renderEditNewFileList();
+
   closeDrawer();
   openModalEl('editTaskOv');
+}
+function renderEditExistingFiles(){
+  const t = tasks.find(x=>x.id===editingTaskId);
+  const el = document.getElementById('eExistingFiles');
+  if(!t || !t.files || !t.files.length){
+    el.innerHTML = '<p style="font-size:12px;color:var(--text3)">目前沒有附件</p>';
+    return;
+  }
+  el.innerHTML = t.files.map(f => {
+    const marked = editFilesToRemove.has(f.id);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 11px;background:var(--surface2);border-radius:8px;font-size:12.5px;margin-bottom:6px;${marked?'opacity:.5':''}">
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${marked?'text-decoration:line-through':''}">📄 ${esc(f.name)}</span>
+      <span style="color:var(--text3);flex-shrink:0">${fmtFileSize(f.size||0)}</span>
+      ${marked
+        ? `<button class="btn sm" onclick="unmarkEditFileRemove(${f.id})">復原</button>`
+        : `<button class="chain-remove" onclick="markEditFileRemove(${f.id})">×</button>`}
+    </div>`;
+  }).join('');
+}
+function markEditFileRemove(fileId){ editFilesToRemove.add(fileId); renderEditExistingFiles(); }
+function unmarkEditFileRemove(fileId){ editFilesToRemove.delete(fileId); renderEditExistingFiles(); }
+function handleEditFiles(input){
+  const MAX_FILES = 10;
+  const files = Array.from(input.files || []);
+  for(const f of files){
+    if(editFilesToAdd.length >= MAX_FILES){ toast('最多只能附加 ' + MAX_FILES + ' 個檔案'); break; }
+    if(f.size > 20 * 1024 * 1024){ toast(f.name + ' 超過 20MB，已略過'); continue; }
+    editFilesToAdd.push(f);
+  }
+  input.value = '';
+  renderEditNewFileList();
+}
+function removeEditNewFile(i){
+  editFilesToAdd.splice(i, 1);
+  renderEditNewFileList();
+}
+function renderEditNewFileList(){
+  const el = document.getElementById('eNewFileList');
+  if(!editFilesToAdd.length){ el.innerHTML = ''; return; }
+  el.innerHTML = editFilesToAdd.map((f,i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 11px;background:var(--accent-soft);border-radius:8px;font-size:12.5px">
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ${esc(f.name)}（新增）</span>
+      <span style="color:var(--text3);flex-shrink:0">${fmtFileSize(f.size)}</span>
+      <button class="chain-remove" onclick="removeEditNewFile(${i})">×</button>
+    </div>`).join('');
 }
 async function submitEditTask(){
   if(!editingTaskId) return;
@@ -2173,12 +2240,48 @@ async function submitEditTask(){
     name: c.name, email: c.email, role: c.role, action: c.action, notify: c.action === 'notify'
   }));
 
+  const btn = document.getElementById('submitEditTaskBtn');
+  const footMsg = document.getElementById('editTaskFootMsg');
+  btn.disabled = true; btn.textContent = '儲存中...';
+
   const { error } = await sb.rpc('update_task_chain', {
     p_task_id: editingTaskId, p_name: name, p_deadline: deadline || null,
     p_note: note, p_seal_type: seal, p_signers: signersPayload, p_is_private: isPrivate, p_visible_roles: visibleRoles
   });
-  if(error){ toast('儲存失敗：' + error.message); return; }
+  if(error){ toast('儲存失敗：' + error.message); btn.disabled=false; btn.textContent='儲存變更'; return; }
 
+  // 處理標記移除的既有附件
+  if(editFilesToRemove.size){
+    const t = tasks.find(x=>x.id===editingTaskId);
+    const toRemove = (t.files||[]).filter(f => editFilesToRemove.has(f.id));
+    if(toRemove.length){
+      await sb.storage.from('task-files').remove(toRemove.map(f=>f.path));
+      await sb.from('task_files').delete().in('id', toRemove.map(f=>f.id));
+    }
+  }
+  // 上傳新增的附件
+  if(editFilesToAdd.length){
+    let ok = 0, fail = 0;
+    for(let i=0;i<editFilesToAdd.length;i++){
+      const f = editFilesToAdd[i];
+      footMsg.textContent = `上傳附件中 ${i+1}/${editFilesToAdd.length}...`;
+      const extMatch = f.name.match(/\.([a-zA-Z0-9]+)$/);
+      const ext = extMatch ? extMatch[1].toLowerCase() : 'bin';
+      const path = `tasks/${editingTaskId}/${Date.now()}_${i}.${ext}`;
+      const { error: upErr } = await sb.storage.from('task-files').upload(path, f, { contentType: f.type || 'application/octet-stream' });
+      if(upErr){ fail++; continue; }
+      const { error: rowErr } = await sb.from('task_files').insert({
+        task_id: editingTaskId, file_name: f.name, file_path: path,
+        content_type: f.type || '', file_size: f.size,
+        uploaded_by: me.id, uploaded_by_name: me.name
+      });
+      if(rowErr){ fail++; } else { ok++; }
+    }
+    footMsg.textContent = '';
+    if(fail){ toast(`⚠️ ${ok} 個附件上傳成功，${fail} 個失敗`); }
+  }
+
+  btn.disabled = false; btn.textContent = '儲存變更';
   closeModal('editTaskOv');
   await loadTasks();
   if(currentPage==='tasks') renderTasks();
