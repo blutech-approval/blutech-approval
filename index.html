@@ -615,9 +615,9 @@ tr.row-click:hover td{background:var(--surface2)}
 
 <!-- ══════════ 附件預覽 Modal ══════════ -->
 <div class="ov" id="filePreviewOv">
-  <div class="modal wide" style="height:88vh;display:flex;flex-direction:column">
+  <div class="modal" style="width:min(1200px,95vw);height:92vh;display:flex;flex-direction:column">
     <div class="m-head"><h3 id="filePreviewTitle">預覽附件</h3><button class="m-close" onclick="closeModal('filePreviewOv')">×</button></div>
-    <div class="m-body" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2)" id="filePreviewBody">
+    <div class="m-body" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);padding:0" id="filePreviewBody">
       <p style="font-size:13px;color:var(--text3)">載入中...</p>
     </div>
   </div>
