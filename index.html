@@ -960,6 +960,10 @@ function subscribeRealtime(){
       await loadNotifications();
       if(payload.new && payload.new.message) toast('🔔 ' + payload.new.message);
     })
+    .on('postgres_changes', { event:'*', schema:'public', table:'task_comments' }, (payload)=>{
+      const tid = (payload.new && payload.new.task_id) || (payload.old && payload.old.task_id);
+      if(drawerTaskId && tid === drawerTaskId) loadTaskComments(drawerTaskId);
+    })
     .subscribe();
 }
 
@@ -2356,8 +2360,20 @@ function openDrawer(taskId){
   }
   right += '</div>';
 
+  right += '<div class="d-sec"><div class="d-sec-title">備註／討論</div>';
+  right += '<div id="commentsList" style="margin-bottom:12px">載入中...</div>';
+  right += `<textarea class="fi" id="newCommentInput" rows="3" placeholder="寫下您的建議或備註（不限字數）..."></textarea>`;
+  right += `<input type="file" id="commentImageInput" accept="image/*" style="display:none" onchange="handleCommentImage(this)">`;
+  right += `<div id="commentImagePreview" style="margin-top:8px"></div>`;
+  right += `<div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+    <button class="btn sm" type="button" onclick="document.getElementById('commentImageInput').click()">📷 附加圖片</button>
+    <button class="btn primary sm" style="margin-left:auto" onclick="submitTaskComment(${t.id})">送出留言</button>
+  </div>`;
+  right += '</div>';
+
   document.getElementById('drBody').innerHTML =
     `<div class="d-body-col">${left}</div><div class="d-body-col">${right}</div>`;
+  loadTaskComments(taskId);
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawerOv').classList.add('open');
 }
@@ -2365,6 +2381,91 @@ function closeDrawer(){
   document.getElementById('drawer').classList.remove('open');
   document.getElementById('drawerOv').classList.remove('open');
   drawerTaskId = null;
+  commentImageFile = null;
+}
+
+// ══════════════════════════════════════
+// 任務留言／備註
+// ══════════════════════════════════════
+let commentImageFile = null;
+async function loadTaskComments(taskId){
+  const { data, error } = await sb.from('task_comments').select('*').eq('task_id', taskId).order('created_at');
+  const el = document.getElementById('commentsList');
+  if(!el) return; // 使用者可能已經切換頁面/關閉面板
+  if(error){ el.innerHTML = '<p style="font-size:12px;color:var(--danger)">讀取留言失敗：' + esc(error.message) + '</p>'; return; }
+  if(!data || !data.length){
+    el.innerHTML = '<p style="font-size:12.5px;color:var(--text3)">目前還沒有留言，歡迎寫下您的建議或備註。</p>';
+    return;
+  }
+  el.innerHTML = '';
+  for(const c of data){
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:10px 0;border-bottom:1px solid var(--surface3)';
+    let imgHtml = '';
+    if(c.image_path){
+      const { data: signed } = await sb.storage.from('task-files').createSignedUrl(c.image_path, 3600);
+      if(signed) imgHtml = `<img src="${signed.signedUrl}" style="max-width:100%;max-height:220px;border-radius:8px;margin-top:6px;cursor:pointer" onclick="window.open('${signed.signedUrl}','_blank')">`;
+    }
+    row.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="font-size:12.5px;font-weight:600">${esc(c.user_name||'')}</div>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          <span style="font-size:11px;color:var(--text3)">${fmtDate(c.created_at)}</span>
+          ${c.user_id===me.id?`<button class="chain-remove" onclick="deleteTaskComment(${c.id})" title="刪除留言">×</button>`:''}
+        </div>
+      </div>
+      ${c.message?`<div style="font-size:13px;color:var(--text2);white-space:pre-wrap;margin-top:3px">${esc(c.message)}</div>`:''}
+      ${imgHtml}
+    `;
+    el.appendChild(row);
+  }
+}
+function handleCommentImage(input){
+  const f = input.files && input.files[0];
+  if(!f) return;
+  if(f.size > 8*1024*1024){ toast('圖片請控制在 8MB 以內'); input.value=''; return; }
+  commentImageFile = f;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('commentImagePreview').innerHTML =
+      `<div style="position:relative;display:inline-block"><img src="${e.target.result}" style="max-height:100px;border-radius:8px">
+       <button class="chain-remove" style="position:absolute;top:-8px;right:-8px;background:var(--surface);border-radius:50%;box-shadow:var(--sh-sm)" onclick="clearCommentImage()">×</button></div>`;
+  };
+  reader.readAsDataURL(f);
+}
+function clearCommentImage(){
+  commentImageFile = null;
+  document.getElementById('commentImageInput').value = '';
+  document.getElementById('commentImagePreview').innerHTML = '';
+}
+async function submitTaskComment(taskId){
+  const input = document.getElementById('newCommentInput');
+  const message = input.value.trim();
+  if(!message && !commentImageFile){ toast('請輸入留言內容或附加圖片'); return; }
+
+  let imagePath = null;
+  if(commentImageFile){
+    const ext = (commentImageFile.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g,'').toLowerCase();
+    imagePath = `comments/${taskId}/${Date.now()}.${ext}`;
+    const { error: upErr } = await sb.storage.from('task-files').upload(imagePath, commentImageFile, { contentType: commentImageFile.type || 'image/jpeg' });
+    if(upErr){ toast('圖片上傳失敗：' + upErr.message); return; }
+  }
+
+  const { error } = await sb.from('task_comments').insert({
+    task_id: taskId, user_id: me.id, user_name: me.name, message, image_path: imagePath
+  });
+  if(error){ toast('送出留言失敗：' + error.message); return; }
+
+  input.value = '';
+  clearCommentImage();
+  await loadTaskComments(taskId);
+  toast('✅ 已送出留言');
+}
+async function deleteTaskComment(commentId){
+  if(!confirm('確定要刪除這則留言嗎？')) return;
+  const { error } = await sb.from('task_comments').delete().eq('id', commentId);
+  if(error){ toast('刪除失敗：' + error.message); return; }
+  if(drawerTaskId) await loadTaskComments(drawerTaskId);
 }
 function openSignFromTask(taskId){
   const t = tasks.find(x=>x.id===taskId);
