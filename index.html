@@ -616,13 +616,13 @@ tr.row-click:hover td{background:var(--surface2)}
 
 <!-- ══════════ 附件預覽 Modal ══════════ -->
 <div class="ov" id="filePreviewOv">
-  <div class="modal" style="width:min(1400px,96vw);height:92vh;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+  <div class="modal" style="width:min(1560px,97vw);height:92vh;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
     <div class="m-head"><h3 id="filePreviewTitle">預覽附件</h3><button class="m-close" onclick="closeFilePreview()">×</button></div>
     <div style="flex:1;overflow:hidden;display:flex">
       <div id="filePreviewBody" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2)">
         <p style="font-size:13px;color:var(--text3)">載入中...</p>
       </div>
-      <div id="filePreviewCommentsPane" style="width:340px;flex-shrink:0;border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;background:var(--surface)">
+      <div id="filePreviewCommentsPane" style="width:440px;flex-shrink:0;border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;background:var(--surface)">
         <div style="padding:14px 16px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700">備註／討論</div>
         <div id="previewCommentsList" style="flex:1;overflow-y:auto;padding:10px 16px">載入中...</div>
         <div style="padding:12px 16px;border-top:1px solid var(--border)">
@@ -1945,6 +1945,11 @@ function fmtFileSize(bytes){
   if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
   return (bytes/1024/1024).toFixed(1) + ' MB';
 }
+function isPreviewableFile(name, contentType){
+  const isPdf = /\.pdf$/i.test(name||'') || contentType === 'application/pdf';
+  const isImg = /\.(png|jpe?g|gif|webp)$/i.test(name||'') || /^image\//.test(contentType||'');
+  return isPdf || isImg;
+}
 function renderLaunchFileList(){
   const el = document.getElementById('lFileList');
   if(!launchFilesDraft.length){ el.innerHTML = '<p style="font-size:12px;color:var(--text3)">尚未選擇檔案</p>'; return; }
@@ -2434,6 +2439,7 @@ async function loadTaskComments(taskId, containerId){
     return;
   }
   el.innerHTML = '';
+  const inPreviewPane = containerId === 'previewCommentsList';
   for(const c of data){
     if(myToken !== commentsLoadTokens[containerId]) return; // 簽名網址載入期間，也再檢查一次是否已過期
     const row = document.createElement('div');
@@ -2442,10 +2448,21 @@ async function loadTaskComments(taskId, containerId){
     if(c.file_path){
       const { data: signed } = await sb.storage.from('task-files').createSignedUrl(c.file_path, 3600);
       if(signed){
+        const previewable = isPreviewableFile(c.file_name, c.content_type);
         const isImg = /^image\//.test(c.content_type||'') || /\.(png|jpe?g|gif|webp)$/i.test(c.file_name||'');
-        attachHtml = isImg
-          ? `<img src="${signed.signedUrl}" style="max-width:100%;max-height:220px;border-radius:8px;margin-top:6px;cursor:pointer" onclick="window.open('${signed.signedUrl}','_blank')">`
-          : `<a href="${signed.signedUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;padding:7px 11px;background:var(--surface2);border-radius:8px;font-size:12.5px;text-decoration:none;color:var(--accent2)">📎 ${esc(c.file_name||'附加檔案')}</a>`;
+        if(previewable && inPreviewPane){
+          // 大視窗檢視裡，點附件直接載入左側主檢視區，不跳新分頁
+          const escName = esc(c.file_name||'附加檔案').replace(/'/g,"\\'");
+          const escPath = c.file_path.replace(/'/g,"\\'");
+          const escType = (c.content_type||'').replace(/'/g,"\\'");
+          attachHtml = isImg
+            ? `<img src="${signed.signedUrl}" style="max-width:100%;max-height:220px;border-radius:8px;margin-top:6px;cursor:pointer" onclick="previewCommentFile('${escPath}','${escName}','${escType}')">`
+            : `<button class="btn sm" style="margin-top:6px" onclick="previewCommentFile('${escPath}','${escName}','${escType}')">📄 ${esc(c.file_name||'附加檔案')}（點擊在左側檢視）</button>`;
+        } else if(isImg){
+          attachHtml = `<img src="${signed.signedUrl}" style="max-width:100%;max-height:220px;border-radius:8px;margin-top:6px;cursor:pointer" onclick="window.open('${signed.signedUrl}','_blank')">`;
+        } else {
+          attachHtml = `<a href="${signed.signedUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;padding:7px 11px;background:var(--surface2);border-radius:8px;font-size:12.5px;text-decoration:none;color:var(--accent2)">📎 ${esc(c.file_name||'附加檔案')}</a>`;
+        }
       }
     }
     row.innerHTML = `
@@ -2683,6 +2700,16 @@ function closeFilePreview(){
   closeModal('filePreviewOv');
   currentPreviewTaskId = null;
 }
+function renderPreviewPane(signedUrl, name, contentType){
+  document.getElementById('filePreviewTitle').textContent = name;
+  const isPdf = /\.pdf$/i.test(name||'') || contentType === 'application/pdf';
+  const body = document.getElementById('filePreviewBody');
+  if(isPdf){
+    body.innerHTML = `<iframe src="${signedUrl}" style="width:100%;height:100%;border:none"></iframe>`;
+  } else {
+    body.innerHTML = `<img src="${signedUrl}" style="max-width:100%;max-height:100%;object-fit:contain">`;
+  }
+}
 async function openFilePreview(fileId){
   const found = findTaskFile(fileId);
   if(!found){ toast('找不到檔案'); return; }
@@ -2699,35 +2726,48 @@ async function openFilePreview(fileId){
     document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--danger)">預覽失敗：' + esc(error.message) + '</p>';
     return;
   }
-  const isPdf = /\.pdf$/i.test(f.name) || f.contentType === 'application/pdf';
-  const body = document.getElementById('filePreviewBody');
-  if(isPdf){
-    body.innerHTML = `<iframe src="${data.signedUrl}" style="width:100%;height:100%;border:none"></iframe>`;
-  } else {
-    body.innerHTML = `<img src="${data.signedUrl}" style="max-width:100%;max-height:100%;object-fit:contain">`;
-  }
+  renderPreviewPane(data.signedUrl, f.name, f.contentType);
 }
-// 從任務詳情的「⤢ 大視窗檢視」進入：有可預覽的附件就直接開左右雙欄檢視，
-// 沒有附件的話就只開留言面板（單欄）
-function openCommentsPanel(taskId){
+// 點擊留言裡附加的可預覽檔案，直接載入左側主檢視區（不跳新分頁）
+async function previewCommentFile(filePath, fileName, contentType){
+  document.getElementById('filePreviewTitle').textContent = fileName;
+  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">載入中...</p>';
+  const { data, error } = await sb.storage.from('task-files').createSignedUrl(filePath, 3600);
+  if(error){
+    document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--danger)">預覽失敗：' + esc(error.message) + '</p>';
+    return;
+  }
+  renderPreviewPane(data.signedUrl, fileName, contentType);
+}
+// 從任務詳情的「⤢ 大視窗檢視」進入：
+// 優先顯示任務本身的正式附件；如果任務沒有正式附件，改抓留言裡最新一筆可預覽的附件顯示；
+// 兩者都沒有的話，才顯示「沒有可預覽附件」
+async function openCommentsPanel(taskId){
   const t = tasks.find(x=>x.id===taskId);
   if(!t) return;
-  const previewable = (t.files||[]).find(f => {
-    const isPdf = /\.pdf$/i.test(f.name) || f.contentType === 'application/pdf';
-    const isImg = /\.(png|jpe?g|gif|webp)$/i.test(f.name) || /^image\//.test(f.contentType||'');
-    return isPdf || isImg;
-  });
+  currentPreviewTaskId = taskId;
+  document.getElementById('filePreviewCommentsPane').style.display = 'flex';
+  openModalEl('filePreviewOv');
+  loadTaskComments(taskId, 'previewCommentsList');
+
+  const previewable = (t.files||[]).find(f => isPreviewableFile(f.name, f.contentType));
   if(previewable){
     openFilePreview(previewable.id);
     return;
   }
-  currentPreviewTaskId = taskId;
+
   document.getElementById('filePreviewTitle').textContent = t.name;
-  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">此任務目前沒有可預覽的附件</p>';
-  document.getElementById('filePreviewCommentsPane').style.display = 'flex';
-  openModalEl('filePreviewOv');
-  loadTaskComments(currentPreviewTaskId, 'previewCommentsList');
+  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">載入中...</p>';
+  const { data: comments } = await sb.from('task_comments').select('*').eq('task_id', taskId).order('created_at', { ascending:false });
+  const commentFile = (comments||[]).find(c => c.file_path && isPreviewableFile(c.file_name, c.content_type));
+  if(commentFile){
+    await previewCommentFile(commentFile.file_path, commentFile.file_name, commentFile.content_type);
+  } else {
+    document.getElementById('filePreviewTitle').textContent = t.name;
+    document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">此任務目前沒有可預覽的附件</p>';
+  }
 }
+
 
 // ══════════════════════════════════════
 // PDF 蓋章
