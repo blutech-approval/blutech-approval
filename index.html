@@ -624,8 +624,8 @@ tr.row-click:hover td{background:var(--surface2)}
     <div class="m-head"><h3 id="filePreviewTitle">預覽附件</h3><button class="m-close" onclick="closeFilePreview()">×</button></div>
     <div style="flex:1;overflow:hidden;display:flex">
       <div style="flex:1;position:relative;overflow:hidden">
-        <div id="filePreviewBody" style="width:100%;height:100%;overflow:auto;display:flex;align-items:center;justify-content:center;background:var(--surface2)">
-          <p style="font-size:13px;color:var(--text3)">載入中...</p>
+        <div id="filePreviewBody" style="width:100%;height:100%;overflow:auto;background:var(--surface2)">
+          <p style="font-size:13px;color:var(--text3);text-align:center;padding-top:80px">載入中...</p>
         </div>
         <div id="previewZoomBar" style="display:none;position:absolute;bottom:16px;left:16px;background:rgba(16,27,39,.85);border-radius:999px;padding:6px 8px;align-items:center;gap:4px;z-index:5">
           <button onclick="zoomPreview(-0.25)" style="width:28px;height:28px;border-radius:50%;border:none;background:rgba(255,255,255,.15);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
@@ -2737,10 +2737,11 @@ function renderPreviewPane(signedUrl, name, contentType){
   previewZoom = 1;
   if(isPdf){
     // PDF 用瀏覽器內建檢視器開啟，本身就有放大縮小功能，不需要額外控制列
-    body.innerHTML = `<iframe src="${signedUrl}" style="width:100%;height:100%;border:none"></iframe>`;
+    body.innerHTML = `<iframe src="${signedUrl}" style="width:100%;height:100%;border:none;display:block"></iframe>`;
     zoomBar.style.display = 'none';
   } else {
-    body.innerHTML = `<img id="previewImgEl" src="${signedUrl}" style="max-width:100%;max-height:100%;object-fit:contain;transform:scale(1);transition:transform .15s;cursor:zoom-in" onclick="zoomPreview(0.25)">`;
+    // 用實際寬度調整（而非視覺變形）+ 置中包裹層，放大後才能正確捲動看到上下左右所有內容
+    body.innerHTML = `<div style="text-align:center;padding:20px"><img id="previewImgEl" src="${signedUrl}" style="display:inline-block;width:100%;height:auto;cursor:zoom-in" onclick="zoomPreview(0.25)"></div>`;
     zoomBar.style.display = 'flex';
     updatePreviewZoomLabel();
   }
@@ -2756,7 +2757,7 @@ function zoomPreviewReset(){
 function applyPreviewZoom(){
   const img = document.getElementById('previewImgEl');
   if(!img) return;
-  img.style.transform = `scale(${previewZoom})`;
+  img.style.width = (previewZoom * 100) + '%';
   img.style.cursor = previewZoom < 4 ? 'zoom-in' : 'default';
   updatePreviewZoomLabel();
 }
@@ -2770,14 +2771,14 @@ async function openFilePreview(fileId){
   const f = found.file;
   currentPreviewTaskId = found.task.id;
   document.getElementById('filePreviewTitle').textContent = f.name;
-  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">載入中...</p>';
+  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3);text-align:center;padding-top:80px">載入中...</p>';
   document.getElementById('filePreviewCommentsPane').style.display = 'flex';
   openModalEl('filePreviewOv');
   loadTaskComments(currentPreviewTaskId, 'previewCommentsList');
 
   const { data, error } = await sb.storage.from('task-files').createSignedUrl(f.path, 600);
   if(error){
-    document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--danger)">預覽失敗：' + esc(error.message) + '</p>';
+    document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--danger);text-align:center;padding-top:80px">預覽失敗：' + esc(error.message) + '</p>';
     return;
   }
   renderPreviewPane(data.signedUrl, f.name, f.contentType);
@@ -2785,10 +2786,10 @@ async function openFilePreview(fileId){
 // 點擊留言裡附加的可預覽檔案，直接載入左側主檢視區（不跳新分頁）
 async function previewCommentFile(filePath, fileName, contentType){
   document.getElementById('filePreviewTitle').textContent = fileName;
-  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">載入中...</p>';
+  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3);text-align:center;padding-top:80px">載入中...</p>';
   const { data, error } = await sb.storage.from('task-files').createSignedUrl(filePath, 3600);
   if(error){
-    document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--danger)">預覽失敗：' + esc(error.message) + '</p>';
+    document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--danger);text-align:center;padding-top:80px">預覽失敗：' + esc(error.message) + '</p>';
     return;
   }
   renderPreviewPane(data.signedUrl, fileName, contentType);
@@ -2811,14 +2812,14 @@ async function openCommentsPanel(taskId){
   }
 
   document.getElementById('filePreviewTitle').textContent = t.name;
-  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">載入中...</p>';
+  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3);text-align:center;padding-top:80px">載入中...</p>';
   const { data: comments } = await sb.from('task_comments').select('*').eq('task_id', taskId).order('created_at', { ascending:false });
   const commentFile = (comments||[]).find(c => c.file_path && isPreviewableFile(c.file_name, c.content_type));
   if(commentFile){
     await previewCommentFile(commentFile.file_path, commentFile.file_name, commentFile.content_type);
   } else {
     document.getElementById('filePreviewTitle').textContent = t.name;
-    document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">此任務目前沒有可預覽的附件</p>';
+    document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3);text-align:center;padding-top:80px">此任務目前沒有可預覽的附件</p>';
   }
 }
 
