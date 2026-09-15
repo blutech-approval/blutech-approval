@@ -200,6 +200,7 @@ tr.row-click:hover td{background:var(--surface2)}
   .modal,.modal.wide{width:96vw}
   #drawer{width:96vw;max-height:94vh}
   .d-body{grid-template-columns:1fr}
+  #filePreviewCommentsPane{display:none}
 }
 </style>
 </head>
@@ -615,10 +616,37 @@ tr.row-click:hover td{background:var(--surface2)}
 
 <!-- ══════════ 附件預覽 Modal ══════════ -->
 <div class="ov" id="filePreviewOv">
-  <div class="modal" style="width:min(1200px,95vw);height:92vh;display:flex;flex-direction:column">
-    <div class="m-head"><h3 id="filePreviewTitle">預覽附件</h3><button class="m-close" onclick="closeModal('filePreviewOv')">×</button></div>
-    <div class="m-body" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);padding:0" id="filePreviewBody">
-      <p style="font-size:13px;color:var(--text3)">載入中...</p>
+  <div class="modal" style="width:min(1400px,96vw);height:92vh;display:flex;flex-direction:column">
+    <div class="m-head"><h3 id="filePreviewTitle">預覽附件</h3><button class="m-close" onclick="closeFilePreview()">×</button></div>
+    <div style="flex:1;overflow:hidden;display:flex">
+      <div id="filePreviewBody" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2)">
+        <p style="font-size:13px;color:var(--text3)">載入中...</p>
+      </div>
+      <div id="filePreviewCommentsPane" style="width:340px;flex-shrink:0;border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;background:var(--surface)">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700">備註／討論</div>
+        <div id="previewCommentsList" style="flex:1;overflow-y:auto;padding:10px 16px">載入中...</div>
+        <div style="padding:12px 16px;border-top:1px solid var(--border)">
+          <div onclick="openCommentComposer(currentPreviewTaskId, 'previewCommentsList')" style="border:1.5px dashed var(--border);border-radius:10px;padding:10px 12px;cursor:text;color:var(--text3);font-size:12.5px;transition:.15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+            ✏️ 撰寫留言...
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 撰寫留言／備註 Modal（大視窗）══════════ -->
+<div class="ov" id="commentComposeOv">
+  <div class="modal wide" style="height:78vh;display:flex;flex-direction:column">
+    <div class="m-head"><h3>撰寫留言／備註</h3><button class="m-close" onclick="closeModal('commentComposeOv')">×</button></div>
+    <div class="m-body" style="flex:1;display:flex;flex-direction:column;overflow-y:auto">
+      <textarea class="fi" id="newCommentInput" placeholder="寫下您的建議或備註（不限字數）..." style="flex:1;min-height:220px;resize:none;font-size:14px;line-height:1.7"></textarea>
+      <input type="file" id="commentImageInput" accept="image/*" style="display:none" onchange="handleCommentImage(this)">
+      <div id="commentImagePreview" style="margin-top:10px"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn sm" type="button" onclick="document.getElementById('commentImageInput').click()">📷 附加圖片</button>
+      <button class="btn primary" onclick="submitTaskComment()">送出留言</button>
     </div>
   </div>
 </div>
@@ -962,7 +990,10 @@ function subscribeRealtime(){
     })
     .on('postgres_changes', { event:'*', schema:'public', table:'task_comments' }, (payload)=>{
       const tid = (payload.new && payload.new.task_id) || (payload.old && payload.old.task_id);
-      if(drawerTaskId && tid === drawerTaskId) loadTaskComments(drawerTaskId);
+      const fromMe = payload.new && me && payload.new.user_id === me.id;
+      if(fromMe) return;
+      if(drawerTaskId && tid === drawerTaskId) loadTaskComments(drawerTaskId, 'commentsList');
+      if(currentPreviewTaskId && tid === currentPreviewTaskId) loadTaskComments(currentPreviewTaskId, 'previewCommentsList');
     })
     .subscribe();
 }
@@ -2360,16 +2391,16 @@ function openDrawer(taskId){
   }
   right += '</div>';
 
-  right += '<div class="d-sec"><div class="d-sec-title">備註／討論</div>';
-  right += '<div id="commentsList" style="margin-bottom:12px">載入中...</div>';
-  right += `<textarea class="fi" id="newCommentInput" rows="3" placeholder="寫下您的建議或備註（不限字數）..."></textarea>`;
-  right += `<input type="file" id="commentImageInput" accept="image/*" style="display:none" onchange="handleCommentImage(this)">`;
-  right += `<div id="commentImagePreview" style="margin-top:8px"></div>`;
-  right += `<div style="display:flex;gap:8px;margin-top:8px;align-items:center">
-    <button class="btn sm" type="button" onclick="document.getElementById('commentImageInput').click()">📷 附加圖片</button>
-    <button class="btn primary sm" style="margin-left:auto" onclick="submitTaskComment(${t.id})">送出留言</button>
+  right += `<div class="d-sec">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div class="d-sec-title" style="margin-bottom:0">備註／討論</div>
+      <button class="btn sm" onclick="openCommentsPanel(${t.id})">⤢ 大視窗檢視</button>
+    </div>
+    <div id="commentsList" style="margin-bottom:10px">載入中...</div>
+    <div onclick="openCommentComposer(${t.id})" style="border:1.5px dashed var(--border);border-radius:10px;padding:12px 14px;cursor:text;color:var(--text3);font-size:13px;transition:.15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+      ✏️ 點擊撰寫留言或新增備註（不限字數，可附圖片）...
+    </div>
   </div>`;
-  right += '</div>';
 
   document.getElementById('drBody').innerHTML =
     `<div class="d-body-col">${left}</div><div class="d-body-col">${right}</div>`;
@@ -2388,9 +2419,14 @@ function closeDrawer(){
 // 任務留言／備註
 // ══════════════════════════════════════
 let commentImageFile = null;
-async function loadTaskComments(taskId){
+let commentsLoadTokens = {};
+let currentPreviewTaskId = null;
+async function loadTaskComments(taskId, containerId){
+  containerId = containerId || 'commentsList';
+  const myToken = (commentsLoadTokens[containerId] = (commentsLoadTokens[containerId]||0) + 1);
   const { data, error } = await sb.from('task_comments').select('*').eq('task_id', taskId).order('created_at');
-  const el = document.getElementById('commentsList');
+  if(myToken !== commentsLoadTokens[containerId]) return; // 有更新的請求了，這次結果就不用管了
+  const el = document.getElementById(containerId);
   if(!el) return; // 使用者可能已經切換頁面/關閉面板
   if(error){ el.innerHTML = '<p style="font-size:12px;color:var(--danger)">讀取留言失敗：' + esc(error.message) + '</p>'; return; }
   if(!data || !data.length){
@@ -2399,6 +2435,7 @@ async function loadTaskComments(taskId){
   }
   el.innerHTML = '';
   for(const c of data){
+    if(myToken !== commentsLoadTokens[containerId]) return; // 圖片簽名網址載入期間，也再檢查一次是否已過期
     const row = document.createElement('div');
     row.style.cssText = 'padding:10px 0;border-bottom:1px solid var(--surface3)';
     let imgHtml = '';
@@ -2420,6 +2457,17 @@ async function loadTaskComments(taskId){
     el.appendChild(row);
   }
 }
+let composingTaskId = null;
+let composingContainerId = 'commentsList';
+function openCommentComposer(taskId, containerId){
+  composingTaskId = taskId;
+  composingContainerId = containerId || 'commentsList';
+  const input = document.getElementById('newCommentInput');
+  if(input) input.value = '';
+  clearCommentImage();
+  openModalEl('commentComposeOv');
+  setTimeout(()=>document.getElementById('newCommentInput')?.focus(), 60);
+}
 function handleCommentImage(input){
   const f = input.files && input.files[0];
   if(!f) return;
@@ -2428,17 +2476,20 @@ function handleCommentImage(input){
   const reader = new FileReader();
   reader.onload = e => {
     document.getElementById('commentImagePreview').innerHTML =
-      `<div style="position:relative;display:inline-block"><img src="${e.target.result}" style="max-height:100px;border-radius:8px">
+      `<div style="position:relative;display:inline-block"><img src="${e.target.result}" style="max-height:160px;border-radius:8px">
        <button class="chain-remove" style="position:absolute;top:-8px;right:-8px;background:var(--surface);border-radius:50%;box-shadow:var(--sh-sm)" onclick="clearCommentImage()">×</button></div>`;
   };
   reader.readAsDataURL(f);
 }
 function clearCommentImage(){
   commentImageFile = null;
-  document.getElementById('commentImageInput').value = '';
-  document.getElementById('commentImagePreview').innerHTML = '';
+  const inputEl = document.getElementById('commentImageInput');
+  if(inputEl) inputEl.value = '';
+  const prevEl = document.getElementById('commentImagePreview');
+  if(prevEl) prevEl.innerHTML = '';
 }
-async function submitTaskComment(taskId){
+async function submitTaskComment(){
+  if(!composingTaskId) return;
   const input = document.getElementById('newCommentInput');
   const message = input.value.trim();
   if(!message && !commentImageFile){ toast('請輸入留言內容或附加圖片'); return; }
@@ -2446,26 +2497,26 @@ async function submitTaskComment(taskId){
   let imagePath = null;
   if(commentImageFile){
     const ext = (commentImageFile.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g,'').toLowerCase();
-    imagePath = `comments/${taskId}/${Date.now()}.${ext}`;
+    imagePath = `comments/${composingTaskId}/${Date.now()}.${ext}`;
     const { error: upErr } = await sb.storage.from('task-files').upload(imagePath, commentImageFile, { contentType: commentImageFile.type || 'image/jpeg' });
     if(upErr){ toast('圖片上傳失敗：' + upErr.message); return; }
   }
 
   const { error } = await sb.from('task_comments').insert({
-    task_id: taskId, user_id: me.id, user_name: me.name, message, image_path: imagePath
+    task_id: composingTaskId, user_id: me.id, user_name: me.name, message, image_path: imagePath
   });
   if(error){ toast('送出留言失敗：' + error.message); return; }
 
-  input.value = '';
-  clearCommentImage();
-  await loadTaskComments(taskId);
+  closeModal('commentComposeOv');
+  await loadTaskComments(composingTaskId, composingContainerId);
   toast('✅ 已送出留言');
 }
 async function deleteTaskComment(commentId){
   if(!confirm('確定要刪除這則留言嗎？')) return;
   const { error } = await sb.from('task_comments').delete().eq('id', commentId);
   if(error){ toast('刪除失敗：' + error.message); return; }
-  if(drawerTaskId) await loadTaskComments(drawerTaskId);
+  if(drawerTaskId) await loadTaskComments(drawerTaskId, 'commentsList');
+  if(currentPreviewTaskId) await loadTaskComments(currentPreviewTaskId, 'previewCommentsList');
 }
 function openSignFromTask(taskId){
   const t = tasks.find(x=>x.id===taskId);
@@ -2611,13 +2662,20 @@ async function downloadTaskFile(fileId){
   if(error){ toast('下載失敗：' + error.message); return; }
   window.open(data.signedUrl, '_blank');
 }
+function closeFilePreview(){
+  closeModal('filePreviewOv');
+  currentPreviewTaskId = null;
+}
 async function openFilePreview(fileId){
   const found = findTaskFile(fileId);
   if(!found){ toast('找不到檔案'); return; }
   const f = found.file;
+  currentPreviewTaskId = found.task.id;
   document.getElementById('filePreviewTitle').textContent = f.name;
   document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">載入中...</p>';
+  document.getElementById('filePreviewCommentsPane').style.display = 'flex';
   openModalEl('filePreviewOv');
+  loadTaskComments(currentPreviewTaskId, 'previewCommentsList');
 
   const { data, error } = await sb.storage.from('task-files').createSignedUrl(f.path, 600);
   if(error){
@@ -2631,6 +2689,27 @@ async function openFilePreview(fileId){
   } else {
     body.innerHTML = `<img src="${data.signedUrl}" style="max-width:100%;max-height:100%;object-fit:contain">`;
   }
+}
+// 從任務詳情的「⤢ 大視窗檢視」進入：有可預覽的附件就直接開左右雙欄檢視，
+// 沒有附件的話就只開留言面板（單欄）
+function openCommentsPanel(taskId){
+  const t = tasks.find(x=>x.id===taskId);
+  if(!t) return;
+  const previewable = (t.files||[]).find(f => {
+    const isPdf = /\.pdf$/i.test(f.name) || f.contentType === 'application/pdf';
+    const isImg = /\.(png|jpe?g|gif|webp)$/i.test(f.name) || /^image\//.test(f.contentType||'');
+    return isPdf || isImg;
+  });
+  if(previewable){
+    openFilePreview(previewable.id);
+    return;
+  }
+  currentPreviewTaskId = taskId;
+  document.getElementById('filePreviewTitle').textContent = t.name;
+  document.getElementById('filePreviewBody').innerHTML = '<p style="font-size:13px;color:var(--text3)">此任務目前沒有可預覽的附件</p>';
+  document.getElementById('filePreviewCommentsPane').style.display = 'flex';
+  openModalEl('filePreviewOv');
+  loadTaskComments(currentPreviewTaskId, 'previewCommentsList');
 }
 
 // ══════════════════════════════════════
