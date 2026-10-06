@@ -202,6 +202,14 @@ tr.row-click:hover td{background:var(--surface2)}
   .d-body{grid-template-columns:1fr}
   #filePreviewCommentsPane{display:none}
 }
+
+.seal-checks{display:flex;flex-wrap:wrap;gap:8px}
+.seal-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;cursor:pointer;background:var(--surface);user-select:none}
+.seal-chip input{accent-color:var(--accent);margin:0}
+.seal-chip:has(input:checked){border-color:var(--accent);background:var(--accent-soft);color:var(--accent2);font-weight:600}
+.note-block{padding:10px 12px;background:var(--surface2);border-radius:10px;margin-bottom:8px}
+.note-block .nb-t{font-size:11.5px;font-weight:700;color:var(--accent2);margin-bottom:3px}
+.note-block .nb-b{font-size:13px;color:var(--text2);line-height:1.7;white-space:pre-wrap;word-break:break-word}
 </style>
 </head>
 <body>
@@ -370,11 +378,8 @@ tr.row-click:hover td{background:var(--surface2)}
         </div>
       </div>
       <div class="fr">
-        <label class="flbl">用印類型</label>
-        <select class="fi" id="lSeal">
-          <option value="company">🔏 合約章</option>
-          <option value="personal">📋 便章</option>
-        </select>
+        <label class="flbl">用印類型（可複選）</label>
+        <div id="lSealChecks" class="seal-checks"></div>
       </div>
       <div class="fr">
         <label class="flbl">可見範圍</label>
@@ -388,8 +393,9 @@ tr.row-click:hover td{background:var(--surface2)}
         </div>
       </div>
       <div class="fr">
-        <label class="flbl">備註說明</label>
-        <textarea class="fi" id="lNote" rows="2" placeholder="選填"></textarea>
+        <label class="flbl">文件說明 <span style="color:var(--danger)">*</span></label>
+        <div style="font-size:12px;color:var(--text3);margin:-2px 0 8px;line-height:1.6">請用主管看得懂的方式，把這份文件的來龍去脈交代清楚。以下五點都是必填，每點寫 1～3 句即可。</div>
+        <div id="lNoteFields"></div>
       </div>
 
       <div class="fr">
@@ -443,13 +449,12 @@ tr.row-click:hover td{background:var(--surface2)}
         <label class="flbl">本次修改說明 <span style="color:var(--danger)">*</span></label>
         <textarea class="fi" id="eVersionNote" rows="2" placeholder="這份文件先前被拒絕過，請說明這次修改了什麼，會一併通知簽核人"></textarea>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div class="fr"><label class="flbl">截止日期</label><input class="fi" id="eDeadline" type="date"></div>
-        <div class="fr"><label class="flbl">用印類型</label>
-          <select class="fi" id="eSeal"><option value="company">🔏 合約章</option><option value="personal">📋 便章</option></select>
-        </div>
+      <div class="fr"><label class="flbl">截止日期</label><input class="fi" id="eDeadline" type="date"></div>
+      <div class="fr"><label class="flbl">用印類型（可複選）</label><div id="eSealChecks" class="seal-checks"></div></div>
+      <div class="fr">
+        <label class="flbl">文件說明 <span style="color:var(--danger)">*</span></label>
+        <div id="eNoteFields"></div>
       </div>
-      <div class="fr"><label class="flbl">備註說明</label><textarea class="fi" id="eNote" rows="2"></textarea></div>
       <div class="fr">
         <label class="flbl">可見範圍</label>
         <select class="fi" id="eVisibility" onchange="toggleVisibilityRoles('e')">
@@ -574,8 +579,13 @@ tr.row-click:hover td{background:var(--surface2)}
       </div>
       <div class="fr"><label class="flbl">備註</label><input class="fi" id="mNote" placeholder="選填，說明適用情境"></div>
       <div class="fr">
-        <label class="flbl">用印類型</label>
-        <select class="fi" id="mSeal"><option value="合約章">合約章</option><option value="便章">便章</option></select>
+        <label class="flbl">用印類型（可複選，也可自訂新的章）</label>
+        <div id="mSealChecks" class="seal-checks"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <input class="fi" id="mSealNew" placeholder="新增其他章，例：騎縫章、公司大章" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomSeal('m')}">
+          <button class="btn sm" type="button" onclick="addCustomSeal('m')">+ 加入</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--text3);margin-top:6px">不勾選任何章代表此類文件不需用印。</div>
       </div>
       <div class="fr">
         <label class="flbl">簽核關卡（依序排列）</label>
@@ -1425,6 +1435,99 @@ function renderTasks(){
 // ══════════════════════════════════════
 // 核決矩陣頁（管理員/CEO 可直接編輯）
 // ══════════════════════════════════════
+// ════════ 用印類型（可自由設定）════════
+const DEFAULT_SEALS = ['合約章','便章','發票章'];
+function normSeals(v){
+  if(!v) return [];
+  const arr = Array.isArray(v) ? v : String(v).split(/[、,，]/);
+  return arr.map(x=>String(x).trim()).filter(Boolean).map(x => x==='company' ? '合約章' : x==='personal' ? '便章' : x);
+}
+function sealText(v){ const a = normSeals(v); return a.length ? a.join('、') : '無需用印'; }
+function allSealOptions(extra){
+  const set = new Set(DEFAULT_SEALS);
+  (MATRIX_DATA||[]).forEach(m => normSeals(m.seal).forEach(x=>set.add(x)));
+  (tasks||[]).forEach(t => normSeals(t.sealType).forEach(x=>set.add(x)));
+  (extra||[]).forEach(x=>set.add(x));
+  return [...set];
+}
+function renderSealChecks(prefix, selected){
+  const el = document.getElementById(prefix+'SealChecks'); if(!el) return;
+  const sel = new Set(selected||[]);
+  el.innerHTML = allSealOptions([...sel]).map(n =>
+    `<label class="seal-chip"><input type="checkbox" value="${esc(n)}" ${sel.has(n)?'checked':''}> ${esc(n)}</label>`).join('');
+}
+function getSealChecks(prefix){
+  const el = document.getElementById(prefix+'SealChecks'); if(!el) return [];
+  return [...el.querySelectorAll('input:checked')].map(i=>i.value);
+}
+function addCustomSeal(prefix){
+  const inp = document.getElementById(prefix+'SealNew');
+  const v = inp.value.trim().replace(/[、,，]/g,'');
+  if(!v){ toast('請輸入章的名稱'); return; }
+  if(v.length > 12){ toast('名稱請在 12 個字以內'); return; }
+  renderSealChecks(prefix, [...new Set([...getSealChecks(prefix), v])]);
+  inp.value = '';
+}
+
+// ════════ 文件說明（發起人必填的五個重點）════════
+const NOTE_FIELDS = [
+  { key:'bg',    title:'背景與目的', hint:'為什麼要簽這份文件？是哪個案子、客戶或需求引起的？',
+    ph:'例：○○公司年度續約，沿用去年合作模式；需在 10/15 前用印，才能趕上 11 月出貨。' },
+  { key:'body',  title:'內容重點', hint:'對象、金額、期間、主要條件；若是續約或修改，請說明與先前有哪裡不同。',
+    ph:'例：對象○○公司；總價 NT$ 1,200,000（未稅）；期間 2026/11–2027/10；付款條件月結 60 天。與去年差異：單價調降 3%。' },
+  { key:'risk',  title:'效益與風險', hint:'對公司的好處是什麼？有哪些風險、特殊條款或例外需要主管留意？',
+    ph:'例：預估年營收 +8%；風險是違約金上限為合約總額 20%，已與對方確認可接受。' },
+  { key:'ask',   title:'需要主管決定的事', hint:'希望主管核准或確認什麼？請寫清楚，主管才知道要看哪裡。',
+    ph:'例：請核准以上條件並同意用印；如需調整條款，請在討論區回覆。' },
+  { key:'ready', title:'時程與已確認事項', hint:'為什麼要在截止日前完成？內部（財務／法務／技術）與對方是否已確認過？',
+    ph:'例：對方 10/15 前要收到正本；財務已確認付款條件，法務已審閱條款。' }
+];
+const NOTE_MIN_LEN = 5;
+function renderNoteFields(prefix, values){
+  const el = document.getElementById(prefix+'NoteFields'); if(!el) return;
+  values = values || {};
+  el.innerHTML = NOTE_FIELDS.map((f,i) => `
+    <div style="margin-bottom:12px">
+      <div style="font-size:13px;font-weight:600;color:var(--text)">${i+1}. ${f.title} <span style="color:var(--danger)">*</span></div>
+      <div style="font-size:11.5px;color:var(--text3);margin:2px 0 5px;line-height:1.5">${f.hint}</div>
+      <textarea class="fi" id="${prefix}Note_${f.key}" rows="2" placeholder="${esc(f.ph)}">${esc(values[f.key]||'')}</textarea>
+    </div>`).join('');
+}
+// 回傳 { text, error }：任一欄位沒填或太短就回報錯誤並聚焦該欄
+function collectNote(prefix){
+  const parts = [];
+  for(const f of NOTE_FIELDS){
+    const ta = document.getElementById(prefix+'Note_'+f.key);
+    const v = ta ? ta.value.trim() : '';
+    if(v.length < NOTE_MIN_LEN){
+      if(ta) ta.focus();
+      return { error: `文件說明「${f.title}」為必填，請具體寫出（至少 ${NOTE_MIN_LEN} 個字）` };
+    }
+    parts.push(`【${f.title}】\n${v}`);
+  }
+  return { text: parts.join('\n\n') };
+}
+// 把儲存的字串拆回各欄位；舊資料（沒有標題）整段放進「背景與目的」
+function parseNote(text){
+  const out = {};
+  if(!text) return out;
+  const re = /【(.+?)】\n([\s\S]*?)(?=\n\n【|$)/g;
+  let m, found = false;
+  while((m = re.exec(text))){
+    const f = NOTE_FIELDS.find(x=>x.title===m[1]);
+    if(f){ out[f.key] = m[2].trim(); found = true; }
+  }
+  if(!found) out.bg = text.trim();
+  return out;
+}
+function noteBlocksHtml(text){
+  if(!text) return '';
+  const v = parseNote(text);
+  const blocks = NOTE_FIELDS.filter(f=>v[f.key]).map(f =>
+    `<div class="note-block"><div class="nb-t">${f.title}</div><div class="nb-b">${esc(v[f.key])}</div></div>`).join('');
+  return blocks;
+}
+
 function renderMatrixPage(){
   const admin = isAdmin();
   let html = '';
@@ -1435,7 +1538,7 @@ function renderMatrixPage(){
   html += MATRIX_DATA.map(m => {
     const chainTxt = '起案 → ' + (m.chain||[]).map(c => `${c.role}（${ACTION_LABEL[c.action]||c.action}）`).join(' → ');
     const actions = admin ? `<td style="white-space:nowrap"><button class="btn sm" onclick="openMatrixEdit(${m.id})">編輯</button> <button class="btn sm danger" onclick="deleteMatrixType(${m.id})">刪除</button></td>` : '';
-    return `<tr><td style="font-weight:700;color:var(--accent)">${esc(m.code)}</td><td>${esc(m.name)}</td><td style="font-size:12.5px">${chainTxt}</td><td>${esc(m.seal)}</td><td style="font-size:12px;color:var(--text3)">${esc(m.note||'')}</td>${actions}</tr>`;
+    return `<tr><td style="font-weight:700;color:var(--accent)">${esc(m.code)}</td><td>${esc(m.name)}</td><td style="font-size:12.5px">${chainTxt}</td><td>${esc(sealText(m.seal))}</td><td style="font-size:12px;color:var(--text3)">${esc(m.note||'')}</td>${actions}</tr>`;
   }).join('');
   html += '</tbody></table></div>';
   if(!admin){
@@ -1451,7 +1554,8 @@ function openMatrixEdit(id){
   document.getElementById('mCode').value = entry ? entry.code : '';
   document.getElementById('mName').value = entry ? entry.name : '';
   document.getElementById('mNote').value = entry ? (entry.note||'') : '';
-  document.getElementById('mSeal').value = entry ? entry.seal : '合約章';
+  renderSealChecks('m', entry ? normSeals(entry.seal) : ['合約章']);
+  document.getElementById('mSealNew').value = '';
   matrixChainDraft = entry ? entry.chain.map(c => ({ role:c.role, action:c.action })) : [];
   renderMatrixChainDraft();
   openModalEl('matrixEditOv');
@@ -1486,7 +1590,7 @@ async function submitMatrixEdit(){
   const code = document.getElementById('mCode').value.trim().toUpperCase();
   const name = document.getElementById('mName').value.trim();
   const note = document.getElementById('mNote').value.trim();
-  const seal = document.getElementById('mSeal').value;
+  const seal = getSealChecks('m').join('、');
   if(!code){ toast('請輸入文件代碼'); return; }
   if(!name){ toast('請輸入文件名稱'); return; }
   if(!matrixChainDraft.length){ toast('請至少設定一個簽核關卡'); return; }
@@ -1925,8 +2029,8 @@ function populateTypeSelect(){
 function openLaunch(){
   document.getElementById('lName').value = '';
   document.getElementById('lType').value = '';
-  document.getElementById('lNote').value = '';
-  document.getElementById('lSeal').value = 'company';
+  renderNoteFields('l', {});
+  renderSealChecks('l', ['合約章']);
   document.getElementById('lVisibility').value = 'all';
   document.getElementById('lVisibilityRoles').style.display = 'none';
   const d = new Date(); d.setDate(d.getDate()+14);
@@ -1976,7 +2080,7 @@ function renderLaunchFileList(){
 function onTypeChange(id){
   const entry = MATRIX_DATA.find(m => String(m.id) === String(id));
   if(!entry) return;
-  document.getElementById('lSeal').value = entry.seal === '合約章' ? 'company' : 'personal';
+  renderSealChecks('l', normSeals(entry.seal));
   chainStores.launch = entry.chain.map(step => {
     const match = directory.find(d => d.role === step.role);
     return {
@@ -2074,22 +2178,25 @@ function submitLaunch(){
   const typeId = document.getElementById('lType').value;
   const typeEntry = MATRIX_DATA.find(m=>String(m.id)===String(typeId));
   const deadline = document.getElementById('lDeadline').value;
-  const seal = document.getElementById('lSeal').value;
+  const seal = getSealChecks('l').join('、');
   const arr = chainStores.launch;
 
   if(!name){ toast('請填寫文件名稱'); return; }
   if(!typeId){ toast('請選擇文件類型'); return; }
+  const noteRes = collectNote('l');
+  if(noteRes.error){ toast(noteRes.error); return; }
   if(!arr.length){ toast('請至少設定一位簽署人'); return; }
   const invalid = arr.find(c => !c.name || !c.email);
   if(invalid){ toast('請完整填寫每一位簽署人的姓名與 Email'); return; }
 
-  const sealLabel = seal === 'personal' ? '便章' : '合約章';
+  const sealLabel = sealText(seal);
   const visibility = document.getElementById('lVisibility').value;
   const visLabel = visibility === 'private' ? '🔒 只有相關人員可見' : '🌐 全部同仁可見';
   let html = `<div style="margin-bottom:10px"><b>文件名稱：</b>${esc(name)}</div>`;
   html += `<div style="margin-bottom:10px"><b>文件類型：</b>${esc(typeEntry ? typeEntry.name : '')}</div>`;
   html += `<div style="margin-bottom:10px"><b>用印類型：</b>${sealLabel}</div>`;
   html += `<div style="margin-bottom:10px"><b>可見範圍：</b>${visLabel}</div>`;
+  html += `<div style="margin-bottom:10px"><b>文件說明：</b></div>` + noteBlocksHtml(noteRes.text);
   html += `<div style="margin-bottom:10px"><b>截止日期：</b>${deadline||'未設定'}</div>`;
   html += `<div style="margin-bottom:10px"><b>附件：</b>${launchFilesDraft.length} 個檔案</div>`;
   html += '<div><b>簽核流程：</b><div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">';
@@ -2109,8 +2216,10 @@ async function doSubmitLaunch(){
   const typeId = document.getElementById('lType').value;
   const typeEntry = MATRIX_DATA.find(m=>String(m.id)===String(typeId));
   const deadline = document.getElementById('lDeadline').value;
-  const note = document.getElementById('lNote').value.trim();
-  const seal = document.getElementById('lSeal').value;
+  const noteRes = collectNote('l');
+  if(noteRes.error){ toast(noteRes.error); return; }
+  const note = noteRes.text;
+  const seal = getSealChecks('l').join('、');
   const isPrivate = document.getElementById('lVisibility').value === 'private';
   const visibleRoles = isPrivate ? getSelectedVisibleRoles('l') : [];
   const arr = chainStores.launch;
@@ -2206,8 +2315,8 @@ function openEditTask(taskId){
   editingTaskId = taskId;
   document.getElementById('eName').value = t.name;
   document.getElementById('eDeadline').value = t.deadline || '';
-  document.getElementById('eNote').value = t.note || '';
-  document.getElementById('eSeal').value = t.sealType || 'company';
+  renderNoteFields('e', parseNote(t.note));
+  renderSealChecks('e', normSeals(t.sealType));
   document.getElementById('eVisibility').value = t.isPrivate ? 'private' : 'all';
   toggleVisibilityRoles('e', t.visibleRoles || []);
 
@@ -2283,8 +2392,8 @@ async function submitEditTask(){
   const t = tasks.find(x=>x.id===editingTaskId);
   const name = document.getElementById('eName').value.trim();
   const deadline = document.getElementById('eDeadline').value;
-  const note = document.getElementById('eNote').value.trim();
-  const seal = document.getElementById('eSeal').value;
+  const noteRes = collectNote('e');
+  const seal = getSealChecks('e').join('、');
   const isPrivate = document.getElementById('eVisibility').value === 'private';
   const visibleRoles = isPrivate ? getSelectedVisibleRoles('e') : [];
   const arr = chainStores.edit;
@@ -2292,6 +2401,8 @@ async function submitEditTask(){
   const versionNote = document.getElementById('eVersionNote').value.trim();
 
   if(!name){ toast('請填寫文件名稱'); return; }
+  if(noteRes.error){ toast(noteRes.error); return; }
+  const note = noteRes.text;
   if(isReopen && !versionNote){ toast('這份文件先前被拒絕過，請填寫本次修改說明'); return; }
   const editable = arr.filter(c => !c.locked);
   const invalid = editable.find(c => !c.name || !c.email);
@@ -2375,9 +2486,10 @@ function openDrawer(taskId){
       發起人：<b>${esc(t.createdBy||'—')}</b><br>
       狀態：<span class="badge b-${t.status}">${STATUS_LABEL[t.status]}</span>${t.version>1?` <span class="chip-role" style="margin-left:4px">第 ${t.version} 版</span>`:''}<br>
       截止日期：${t.deadline||'未設定'}<br>
-      進度：${done}/${t.signers.length} 人完成<br>
-      ${t.note?('備註：'+esc(t.note)):''}
+      用印：${esc(sealText(t.sealType))}<br>
+      進度：${done}/${t.signers.length} 人完成
     </div>
+    ${t.note ? `<div class="d-sec-title" style="margin-top:14px">文件說明（發起人填寫）</div>${noteBlocksHtml(t.note)}` : ''}
     ${t.version>1 && t.versionNote ? `<div style="margin-top:10px;padding:10px 12px;background:var(--accent-soft);border-radius:10px;font-size:12.5px;color:var(--accent2)"><b>本版修改說明：</b>${esc(t.versionNote)}</div>` : ''}
   </div>`;
 
